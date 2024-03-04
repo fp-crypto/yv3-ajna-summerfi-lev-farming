@@ -2,12 +2,13 @@
 pragma solidity 0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
-import {IStrategyInterface} from "./interfaces/IStrategyInterface.sol";
 import {UniswapV3Swapper} from "@periphery/swappers/UniswapV3Swapper.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IWETH} from "./interfaces/IWeth.sol";
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
+
+import {IStrategyInterface} from "./interfaces/IStrategyInterface.sol";
+import {IWETH} from "./interfaces/IWeth.sol";
 import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IBalancer} from "./interfaces/balancer/IBalancer.sol";
@@ -22,10 +23,10 @@ interface IAccountFactory {
 interface IAccount {
     function send(address _target, bytes calldata _data) external payable;
 
-    function execute(
-        address _target,
-        bytes memory _data
-    ) external payable returns (bytes32);
+    function execute(address _target, bytes memory _data)
+        external
+        payable
+        returns (bytes32);
 }
 
 contract Strategy is BaseStrategy, UniswapV3Swapper {
@@ -76,26 +77,25 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     constructor(
         address _asset,
         string memory _name,
-        IERC20Pool _ajnaPool,
+        address _ajnaPool,
         bytes4 _unwrappedToWrappedSelector,
-        IChainlinkAggregator _chainlinkOracle,
+        address _chainlinkOracle,
         bool _oracleWrapped
     ) BaseStrategy(_asset, _name) {
-        require(_asset == _ajnaPool.collateralAddress(), "!collat"); // dev: asset must be collateral
+        require(_asset == IERC20Pool(_ajnaPool).collateralAddress(), "!collat"); // dev: asset must be collateral
 
-        address _quoteToken = _ajnaPool.quoteTokenAddress();
-        require(WETH == _ajnaPool.quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
+        address _quoteToken = IERC20Pool(_ajnaPool).quoteTokenAddress();
+        require(WETH == IERC20Pool(_ajnaPool).quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
 
         address _summerfiAccount = SUMMERFI_ACCOUNT_FACTORY.createAccount();
 
-        ajnaPool = _ajnaPool;
+        ajnaPool = IERC20Pool(_ajnaPool);
         summerfiAccount = IAccount(_summerfiAccount);
         unwrappedToWrappedSelector = _unwrappedToWrappedSelector;
-        chainlinkOracle = _chainlinkOracle;
+        chainlinkOracle = IChainlinkAggregator(_chainlinkOracle);
         oracleWrapped = _oracleWrapped;
 
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
-        ERC20(WETH).safeApprove(address(BALANCER_VAULT), type(uint256).max);
 
         LTVConfig memory _ltvs;
         _ltvs.targetLTV = 0.5e18; // TODO: delete this
@@ -104,7 +104,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         _ltvs.emergencyThreshold = DEFAULT_EMERGENCY_THRESHOLD;
         ltvs = _ltvs;
 
-        depositLimit = 2 ** 256 - 1; // TODO: delete this
+        depositLimit = 2**256 - 1; // TODO: delete this
 
         _setUniFees(_asset, WETH, 100);
         _setUniFees(AJNA_TOKEN, WETH, 10000);
@@ -277,9 +277,12 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      * @return . The available amount the `_owner` can deposit in terms of `asset`
      *
      */
-    function availableDepositLimit(
-        address _owner
-    ) public view override returns (uint256) {
+    function availableDepositLimit(address _owner)
+        public
+        view
+        override
+        returns (uint256)
+    {
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
         return _totalAssets >= depositLimit ? 0 : depositLimit - _totalAssets;
     }
@@ -414,7 +417,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         require(_targetBorrow > _debt); // dev: something is very wrong
         uint256 _toBorrow = _targetBorrow - _debt;
         bytes memory _flashLoanData = abi.encode(true, uint256(0));
-        emit LeverUp(_totalIdle, _collateral + _totalIdle, _ltvs.targetLTV);
+        emit LeverUp(_toBorrow, _collateral + _totalIdle, _ltvs.targetLTV);
         _initFlashLoan(_toBorrow, _flashLoanData);
     }
 
@@ -490,7 +493,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             uint256 _collateralToAdd = asset.balanceOf(address(this));
             if (!positionOpen) {
                 positionOpen = true;
-                _openPosition(_debtAmount + ONE_WAD, _collateralToAdd, ONE_WAD); // TODO: set real price
+                _openPosition(_debtAmount, _collateralToAdd, ONE_WAD); // TODO: set real price
             } else {
                 _depositAndDraw(_debtAmount, _collateralToAdd, ONE_WAD, false);
             }
@@ -502,6 +505,8 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             // Exact output swap
             _swapTo(address(asset), WETH, _debtAmount, 0); // TODO: set maxIn to a slippage value
         }
+        // Repay flashloan
+        ERC20(WETH).safeTransfer(address(BALANCER_VAULT), _debtAmount);
     }
 
     /**
@@ -533,7 +538,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      *  @return Conversion rate
      */
     function _assetPerWeth() internal view returns (uint256) {
-        uint256 _answer = (ONE_WAD ** 2) /
+        uint256 _answer = (ONE_WAD**2) /
             uint256(chainlinkOracle.latestAnswer());
         if (oracleWrapped) {
             return _answer;
@@ -625,9 +630,11 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         );
     }
 
-    function _unwrappedToWrappedAsset(
-        uint256 _amount
-    ) internal view returns (uint256) {
+    function _unwrappedToWrappedAsset(uint256 _amount)
+        internal
+        view
+        returns (uint256)
+    {
         (bool success, bytes memory data) = address(asset).staticcall(
             abi.encodeWithSelector(unwrappedToWrappedSelector, _amount)
         );

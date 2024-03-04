@@ -14,3 +14,7 @@
 	path = lib/tokenized-strategy-periphery
 	url = https://github.com/yearn/tokenized-strategy-periphery
 	branch = master
+[submodule "lib/ajna-core"]
+	path = lib/ajna-core
+	url = https://github.com/ajna-finance/ajna-core
+	branch = master

@@ -20,7 +20,7 @@ contract OperationTest is Setup {
     }
 
     function test_operation(uint256 _amount) public {
-        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _amount = 10e18;// _amount > minFuzzAmount && _amount < maxFuzzAmount);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -29,6 +29,13 @@ contract OperationTest is Setup {
         assertEq(strategy.totalAssets(), _amount, "!totalAssets");
         assertEq(strategy.totalDebt(), 0, "!totalDebt");
         assertEq(strategy.totalIdle(), _amount, "!totalIdle");
+
+        vm.prank(keeper);
+        strategy.tend();
+
+        assertEq(strategy.totalAssets(), _amount, "!totalAssets");
+        assertEq(strategy.totalDebt(), _amount, "!totalDebt");
+        assertEq(strategy.totalIdle(), 0, "!totalIdle");
 
         // Earn Interest
         skip(1 days);

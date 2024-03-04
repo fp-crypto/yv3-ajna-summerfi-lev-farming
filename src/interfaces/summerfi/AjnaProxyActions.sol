@@ -6,6 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
+import {IWETH} from "../IWETH.sol";
 
 interface IAjnaPoolUtilsInfo {
     function priceToIndex(uint256 price_) external pure returns (uint256);
@@ -71,14 +72,6 @@ interface IAccountGuard {
     function isWhitelisted(address target) external view returns (bool);
 
     function isWhitelistedSend(address target) external view returns (bool);
-}
-
-interface IWETH {
-    function deposit() external payable;
-
-    function transfer(address to, uint256 value) external returns (bool);
-
-    function withdraw(uint256) external;
 }
 
 contract AjnaProxyActions {

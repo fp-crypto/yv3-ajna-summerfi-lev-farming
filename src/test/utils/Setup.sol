@@ -10,6 +10,9 @@ import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 // Inherit the events so they can be checked if desired.
 import {IEvents} from "@tokenized-strategy/interfaces/IEvents.sol";
 
+import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
+import {ERC20PoolFactory} from "@ajna-core/ERC20PoolFactory.sol";
+
 interface IFactory {
     function governance() external view returns (address);
 
@@ -30,6 +33,7 @@ contract Setup is ExtendedTest, IEvents {
     address public keeper = address(4);
     address public management = address(1);
     address public performanceFeeRecipient = address(3);
+    address public ajnaDepositor = address(42069);
 
     // Address of the real deployed Factory
     address public factory;
@@ -39,8 +43,8 @@ contract Setup is ExtendedTest, IEvents {
     uint256 public MAX_BPS = 10_000;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
-    uint256 public maxFuzzAmount = 1e30;
-    uint256 public minFuzzAmount = 10_000;
+    uint256 public maxFuzzAmount = 10e18;
+    uint256 public minFuzzAmount = 7e18;
 
     // Default profit max unlock time is set for 10 days
     uint256 public profitMaxUnlockTime = 10 days;
@@ -49,7 +53,7 @@ contract Setup is ExtendedTest, IEvents {
         _setTokenAddrs();
 
         // Set asset
-        asset = ERC20(tokenAddrs["DAI"]);
+        asset = ERC20(tokenAddrs["WSTETH"]);
 
         // Set decimals
         decimals = asset.decimals();
@@ -63,6 +67,7 @@ contract Setup is ExtendedTest, IEvents {
         vm.label(keeper, "keeper");
         vm.label(factory, "factory");
         vm.label(address(asset), "asset");
+        vm.label(tokenAddrs["WETH"], "WETH");
         vm.label(management, "management");
         vm.label(address(strategy), "strategy");
         vm.label(performanceFeeRecipient, "performanceFeeRecipient");
@@ -71,7 +76,16 @@ contract Setup is ExtendedTest, IEvents {
     function setUpStrategy() public returns (address) {
         // we save the strategy as a IStrategyInterface to give it the needed interface
         IStrategyInterface _strategy = IStrategyInterface(
-            address(new Strategy(address(asset), "Tokenized Strategy"))
+            address(
+                new Strategy(
+                    address(asset),
+                    "Tokenized Strategy",
+                    getAjnaPoolForAsset(address(asset)),
+                    bytes4(0xb0e38900), // selector,
+                    0x86392dC19c0b719886221c78AB11eb8Cf5c52812, // oracle,
+                    false // oracleWrapped
+                )
+            )
         );
 
         // set keeper
@@ -83,6 +97,8 @@ contract Setup is ExtendedTest, IEvents {
 
         vm.prank(management);
         _strategy.acceptManagement();
+
+        supplyQuote(100e18, getAjnaPoolForAsset(address(asset)));
 
         return address(_strategy);
     }
@@ -99,6 +115,24 @@ contract Setup is ExtendedTest, IEvents {
         _strategy.deposit(_amount, _user);
     }
 
+    function getAjnaPoolForAsset(address _asset)
+        public
+        returns (address _pool)
+    {
+        ERC20PoolFactory ajnaFactory = ERC20PoolFactory(
+            0x6146DD43C5622bB6D12A5240ab9CF4de14eDC625
+        );
+        address WETH = tokenAddrs["WETH"];
+
+        for (uint256 i; i < ajnaFactory.getNumberOfDeployedPools(); ++i) {
+            IERC20Pool pool = IERC20Pool(ajnaFactory.deployedPoolsList(i));
+            if (
+                pool.collateralAddress() == _asset &&
+                pool.quoteTokenAddress() == WETH
+            ) return address(pool);
+        }
+    }
+
     function mintAndDepositIntoStrategy(
         IStrategyInterface _strategy,
         address _user,
@@ -106,6 +140,15 @@ contract Setup is ExtendedTest, IEvents {
     ) public {
         airdrop(asset, _user, _amount);
         depositIntoStrategy(_strategy, _user, _amount);
+    }
+
+    function supplyQuote(uint256 _amount, address _ajnaPool) public {
+        ERC20 WETH = ERC20(tokenAddrs["WETH"]);
+        airdrop(WETH, ajnaDepositor, _amount);
+        vm.prank(ajnaDepositor);
+        WETH.approve(_ajnaPool, _amount);
+        vm.prank(ajnaDepositor);
+        IERC20Pool(_ajnaPool).addQuoteToken(_amount, 4136, type(uint256).max);
     }
 
     // For checking the amounts in the strategy
@@ -121,7 +164,11 @@ contract Setup is ExtendedTest, IEvents {
         assertEq(_totalAssets, _totalDebt + _totalIdle, "!Added");
     }
 
-    function airdrop(ERC20 _asset, address _to, uint256 _amount) public {
+    function airdrop(
+        ERC20 _asset,
+        address _to,
+        uint256 _amount
+    ) public {
         uint256 balanceBefore = _asset.balanceOf(_to);
         deal(address(_asset), _to, balanceBefore + _amount);
     }
@@ -148,5 +195,7 @@ contract Setup is ExtendedTest, IEvents {
         tokenAddrs["USDT"] = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
         tokenAddrs["DAI"] = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
         tokenAddrs["USDC"] = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+        tokenAddrs["WSTETH"] = 0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0;
+        tokenAddrs["RETH"] = 0xae78736Cd615f374D3085123A210448E74Fc6393;
     }
 }

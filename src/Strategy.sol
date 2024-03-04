@@ -2,35 +2,136 @@
 pragma solidity 0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
+import {IStrategyInterface} from "./interfaces/IStrategyInterface.sol";
+import {UniswapV3Swapper} from "@periphery/swappers/UniswapV3Swapper.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IWETH} from "./interfaces/IWeth.sol";
+import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
+import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
+import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
+import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
+import {IBalancer} from "./interfaces/balancer/IBalancer.sol";
+import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
-// Import interfaces for many popular DeFi projects, or add your own!
-//import "../interfaces/<protocol>/<Interface>.sol";
+interface IAccountFactory {
+    function createAccount() external returns (address);
 
-/**
- * The `TokenizedStrategy` variable can be used to retrieve the strategies
- * specific storage data your contract.
- *
- *       i.e. uint256 totalAssets = TokenizedStrategy.totalAssets()
- *
- * This can not be used for write functions. Any TokenizedStrategy
- * variables that need to be updated post deployment will need to
- * come from an external call from the strategies specific `management`.
- */
+    function createAccount(address user) external returns (address);
+}
 
-// NOTE: To implement permissioned functions you can use the onlyManagement, onlyEmergencyAuthorized and onlyKeepers modifiers
+interface IAccount {
+    function send(address _target, bytes calldata _data) external payable;
 
-contract Strategy is BaseStrategy {
+    function execute(
+        address _target,
+        bytes memory _data
+    ) external payable returns (bytes32);
+}
+
+contract Strategy is BaseStrategy, UniswapV3Swapper {
     using SafeERC20 for ERC20;
+
+    IAccountFactory private constant SUMMERFI_ACCOUNT_FACTORY =
+        IAccountFactory(0xF7B75183A2829843dB06266c114297dfbFaeE2b6);
+    AjnaProxyActions private constant SUMMERFI_AJNA_PROXY_ACTIONS =
+        AjnaProxyActions(0x3637DF43F938b05A71bb828f13D9f14498E6883c);
+    PoolInfoUtils private constant POOL_INFO_UTILS =
+        PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
+    IAjnaRedeemer private constant SUMMERFI_REWARDS =
+        IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
+    IBalancer private constant BALANCER_VAULT =
+        IBalancer(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
+
+    address public WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address public AJNA_TOKEN = 0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079;
+
+    IAccount public immutable summerfiAccount;
+    IERC20Pool public immutable ajnaPool;
+    IChainlinkAggregator public immutable chainlinkOracle;
+    bool public immutable oracleWrapped;
+
+    bytes4 private immutable unwrappedToWrappedSelector;
+
+    bool private flashloanActive;
+    bool private positionOpen;
+
+    struct LTVConfig {
+        uint64 targetLTV;
+        uint64 minAdjustThreshold;
+        uint64 warningThreshold;
+        uint64 emergencyThreshold;
+    }
+    LTVConfig public ltvs;
+
+    uint256 public depositLimit;
+    uint256 public expectedFlashloanFee;
+    uint256 public slippageAllowedBps = 50;
+
+    uint256 private constant ONE_WAD = 1e18;
+    uint256 private constant MAX_BPS = 1e4; // 100% in basis points
+    uint64 internal constant DEFAULT_MIN_ADJUST_THRESHOLD = 0.005e18;
+    uint64 internal constant DEFAULT_WARNING_THRESHOLD = 0.02e18;
+    uint64 internal constant DEFAULT_EMERGENCY_THRESHOLD = 0.01e18;
 
     constructor(
         address _asset,
-        string memory _name
-    ) BaseStrategy(_asset, _name) {}
+        string memory _name,
+        IERC20Pool _ajnaPool,
+        bytes4 _unwrappedToWrappedSelector,
+        IChainlinkAggregator _chainlinkOracle,
+        bool _oracleWrapped
+    ) BaseStrategy(_asset, _name) {
+        require(_asset == _ajnaPool.collateralAddress(), "!collat"); // dev: asset must be collateral
 
-    /*//////////////////////////////////////////////////////////////
-                NEEDED TO BE OVERRIDDEN BY STRATEGIST
-    //////////////////////////////////////////////////////////////*/
+        address _quoteToken = _ajnaPool.quoteTokenAddress();
+        require(WETH == _ajnaPool.quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
+
+        address _summerfiAccount = SUMMERFI_ACCOUNT_FACTORY.createAccount();
+
+        ajnaPool = _ajnaPool;
+        summerfiAccount = IAccount(_summerfiAccount);
+        unwrappedToWrappedSelector = _unwrappedToWrappedSelector;
+        chainlinkOracle = _chainlinkOracle;
+        oracleWrapped = _oracleWrapped;
+
+        ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
+        ERC20(WETH).safeApprove(address(BALANCER_VAULT), type(uint256).max);
+
+        LTVConfig memory _ltvs;
+        _ltvs.targetLTV = 0.5e18; // TODO: delete this
+        _ltvs.minAdjustThreshold = DEFAULT_MIN_ADJUST_THRESHOLD;
+        _ltvs.warningThreshold = DEFAULT_WARNING_THRESHOLD;
+        _ltvs.emergencyThreshold = DEFAULT_EMERGENCY_THRESHOLD;
+        ltvs = _ltvs;
+
+        depositLimit = 2 ** 256 - 1; // TODO: delete this
+
+        _setUniFees(_asset, WETH, 100);
+        _setUniFees(AJNA_TOKEN, WETH, 10000);
+    }
+
+    function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
+        require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less then emergency threshold
+        ltvs = _ltvs;
+    }
+
+    function setUniFee(address _token, uint24 _fee) external onlyManagement {
+        require(_token == address(asset) || _token == AJNA_TOKEN); // dev: must be asset or ajna token
+        _setUniFees(_token, WETH, _fee);
+    }
+
+    function positionInfo()
+        external
+        view
+        returns (
+            uint256 _debt,
+            uint256 _collateral,
+            uint256 _t0Np,
+            uint256 _thresholdPrice
+        )
+    {
+        return _positionInfo();
+    }
 
     /**
      * @dev Should deploy up to '_amount' of 'asset' in the yield source.
@@ -44,9 +145,11 @@ contract Strategy is BaseStrategy {
      * to deposit in the yield source.
      */
     function _deployFunds(uint256 _amount) internal override {
-        // TODO: implement deposit logic EX:
-        //
-        //      lendingPool.deposit(address(asset), _amount ,0);
+        if (!positionOpen) {
+            return;
+        }
+
+        _depositAndDraw(0, _amount, 0, false); // deposit as collateral
     }
 
     /**
@@ -103,14 +206,12 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256 _totalAssets)
     {
-        // TODO: Implement harvesting logic and accurate accounting EX:
-        //
-        //      if(!TokenizedStrategy.isShutdown()) {
-        //          _claimAndSellRewards();
-        //      }
-        //      _totalAssets = aToken.balanceOf(address(this)) + asset.balanceOf(address(this));
-        //
-        _totalAssets = asset.balanceOf(address(this));
+        _adjustPosition();
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        _totalAssets =
+            asset.balanceOf(address(this)) +
+            _collateral -
+            _unwrappedToWrappedAsset(_debt); // TODO: Better conversion from quote to asset
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -140,8 +241,10 @@ contract Strategy is BaseStrategy {
      *
      * @param _totalIdle The current amount of idle funds that are available to deploy.
      *
-    function _tend(uint256 _totalIdle) internal override {}
-    */
+     */
+    function _tend(uint256 _totalIdle) internal override {
+        _adjustPosition();
+    }
 
     /**
      * @dev Optional trigger to override if tend() will be used by the strategy.
@@ -173,16 +276,30 @@ contract Strategy is BaseStrategy {
      * @param . The address that is depositing into the strategy.
      * @return . The available amount the `_owner` can deposit in terms of `asset`
      *
+     */
     function availableDepositLimit(
         address _owner
     ) public view override returns (uint256) {
-        TODO: If desired Implement deposit limit logic and any needed state variables .
-        
-        EX:    
-            uint256 totalAssets = TokenizedStrategy.totalAssets();
-            return totalAssets >= depositLimit ? 0 : depositLimit - totalAssets;
+        uint256 _totalAssets = TokenizedStrategy.totalAssets();
+        return _totalAssets >= depositLimit ? 0 : depositLimit - _totalAssets;
     }
-    */
+
+    /**
+     * @dev Claims summerfi ajna rewards
+     *
+     * Unguarded because there is no risk claiming
+     *
+     * @param _weeks An array of week numbers for which to claim rewards.
+     * @param _amounts An array of reward amounts to claim.
+     * @param _proofs An array of Merkle proofs, one for each corresponding week and amount given.
+     */
+    function redeemSummerAjnaRewards(
+        uint256[] calldata _weeks,
+        uint256[] calldata _amounts,
+        bytes32[][] calldata _proofs
+    ) external {
+        SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
+    }
 
     /**
      * @notice Gets the max amount of `asset` that can be withdrawn.
@@ -241,5 +358,328 @@ contract Strategy is BaseStrategy {
             _freeFunds(_amount);
     }
 
-    */
+    **/
+
+    /**
+     * @notice Adjusts the leveraged position
+     */
+    function _adjustPosition() internal {
+        uint256 _totalIdle = asset.balanceOf(address(this));
+        (
+            uint256 _debt,
+            uint256 _collateral,
+            ,
+            uint256 _thresholdPrice
+        ) = _positionInfo();
+        LTVConfig memory _ltvs = ltvs;
+        uint256 _price = _assetPerWeth();
+        uint256 _currentLtv = _calculateLTV(_collateral, _debt, _price);
+
+        if (
+            positionOpen &&
+            (_price <= _thresholdPrice ||
+                _currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold)
+        ) {
+            //_leverDown(_debt, _collateral, 0, _ltvs);
+        } else if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
+            _leverUp(_debt, _collateral, _totalIdle, _ltvs, _price);
+        } else {
+            return; // bail out if we are doing nothing
+        }
+
+        (_debt, _collateral, , _thresholdPrice) = _positionInfo();
+        _currentLtv = _calculateLTV(_collateral, _debt, _price);
+        // TODO: consider what the best check would be
+        //require(_currentLtv < _ltvs.targetLTV + _ltvs.minAdjustThreshold); // dev: not safe
+    }
+
+    // TODO: delete this
+    event LeverUp(uint256 borrow, uint256 collateral, uint256 targetLTV);
+
+    /**
+     * @notice Levers up
+     */
+    function _leverUp(
+        uint256 _debt,
+        uint256 _collateral,
+        uint256 _totalIdle,
+        LTVConfig memory _ltvs,
+        uint256 _assetPerWeth
+    ) internal {
+        uint256 _targetBorrow = _getBorrowFromSupply(
+            _collateral + _totalIdle,
+            _ltvs.targetLTV,
+            _assetPerWeth
+        );
+        require(_targetBorrow > _debt); // dev: something is very wrong
+        uint256 _toBorrow = _targetBorrow - _debt;
+        bytes memory _flashLoanData = abi.encode(true, uint256(0));
+        emit LeverUp(_totalIdle, _collateral + _totalIdle, _ltvs.targetLTV);
+        _initFlashLoan(_toBorrow, _flashLoanData);
+    }
+
+    /**
+     * @notice Levers down
+     */
+    function _leverDown(
+        uint256 _debt,
+        uint256 _collateral,
+        uint256 _collateralToFree,
+        LTVConfig memory _ltvs
+    ) internal {
+        uint256 _repaymentAmount;
+        if (_collateralToFree > _collateral) {
+            _collateralToFree = _collateral;
+        }
+
+        uint256 _targetBorrow = _getBorrowFromSupply(
+            _collateral - _collateralToFree,
+            _ltvs.targetLTV,
+            _assetPerWeth()
+        );
+
+        require(_targetBorrow <= _debt); // dev: something is very wrong
+        _repaymentAmount = _debt - _targetBorrow;
+        uint256 _collateralToWithdraw = _collateralToFree +
+            ((_unwrappedToWrappedAsset(_repaymentAmount) *
+                (MAX_BPS + slippageAllowedBps)) / MAX_BPS); // TODO: This calculation is wrong
+        bytes memory _flashLoanData = abi.encode(false, _collateralToWithdraw);
+        _initFlashLoan(_repaymentAmount, _flashLoanData);
+    }
+
+    // ----------------- FLASHLOAN -----------------
+    /**
+     *  @notice Initiate flash loan via balancer
+     *  @param  _amount     Amount to flashloan
+     *  @param  _data       Byte array to send with the flashloan
+     */
+    function _initFlashLoan(uint256 _amount, bytes memory _data) internal {
+        address[] memory _tokens = new address[](1);
+        _tokens[0] = address(WETH);
+        uint256[] memory _amounts = new uint256[](1);
+        _amounts[0] = _amount;
+        flashloanActive = true;
+        IBalancer(BALANCER_VAULT).flashLoan(
+            address(this),
+            _tokens,
+            _amounts,
+            _data
+        );
+    }
+
+    // ----------------- FLASHLOAN CALLBACK -----------------
+    function receiveFlashLoan(
+        ERC20[] calldata,
+        uint256[] calldata _amounts,
+        uint256[] calldata _fees,
+        bytes calldata _data
+    ) external {
+        require(msg.sender == address(BALANCER_VAULT));
+        require(flashloanActive == true);
+        flashloanActive = false;
+        uint256 _fee = _fees[0];
+        require(_fee <= expectedFlashloanFee); // dev: flashloan fee too high
+        (bool _leverUp, uint256 _collateralAmount) = abi.decode(
+            _data,
+            (bool, uint256)
+        );
+        uint256 _debtAmount = _amounts[0];
+        if (_leverUp) {
+            // Exact input swap
+            _swapFrom(WETH, address(asset), _debtAmount, 0); // TODO: set minOut to a slippage value
+            uint256 _collateralToAdd = asset.balanceOf(address(this));
+            if (!positionOpen) {
+                positionOpen = true;
+                _openPosition(_debtAmount + ONE_WAD, _collateralToAdd, ONE_WAD); // TODO: set real price
+            } else {
+                _depositAndDraw(_debtAmount, _collateralToAdd, ONE_WAD, false);
+            }
+        }
+        /* leverDown */
+        else {
+            // TODO: lever down logic
+            _repayWithdraw(_debtAmount, _collateralAmount, false);
+            // Exact output swap
+            _swapTo(address(asset), WETH, _debtAmount, 0); // TODO: set maxIn to a slippage value
+        }
+    }
+
+    /**
+     *  @notice Retrieves info related to our debt position
+     *  @return _debt             Current debt owed (`WAD`).
+     *  @return _collateral       Pledged collateral, including encumbered (`WAD`).
+     *  @return _t0Np             `Neutral price` (`WAD`).
+     *  @return _thresholdPrice   Borrower's `Threshold Price` (`WAD`).
+     */
+    function _positionInfo()
+        internal
+        view
+        returns (
+            uint256 _debt,
+            uint256 _collateral,
+            uint256 _t0Np,
+            uint256 _thresholdPrice
+        )
+    {
+        return
+            POOL_INFO_UTILS.borrowerInfo(
+                address(ajnaPool),
+                address(summerfiAccount)
+            );
+    }
+
+    /**
+     *  @notice Retrieves the oracle rate asset/quoteToken
+     *  @return Conversion rate
+     */
+    function _assetPerWeth() internal view returns (uint256) {
+        uint256 _answer = (ONE_WAD ** 2) /
+            uint256(chainlinkOracle.latestAnswer());
+        if (oracleWrapped) {
+            return _answer;
+        }
+        return _unwrappedToWrappedAsset(_answer);
+    }
+
+    /***************************************
+     *      POSITION HELPER FUNCTIONS      *
+     ***************************************/
+
+    /**
+     *  @notice Open position via account proxy
+     *  @param  _debtAmount     Amount of debt to borrow
+     *  @param  _collateralAmount Amount of collateral to deposit
+     *  @param  _price          Price of the bucket
+     */
+    function _openPosition(
+        uint256 _debtAmount,
+        uint256 _collateralAmount,
+        uint256 _price
+    ) internal {
+        summerfiAccount.execute(
+            address(SUMMERFI_AJNA_PROXY_ACTIONS),
+            abi.encodeCall(
+                SUMMERFI_AJNA_PROXY_ACTIONS.openPosition,
+                (ajnaPool, _debtAmount, _collateralAmount, _price)
+            )
+        );
+        IWETH(WETH).deposit{value: address(this).balance}(); // summer contracts use Ether not WETH
+    }
+
+    /**
+     *  @notice Deposit collateral and draw debt via account proxy
+     *  @param  _debtAmount     Amount of debt to borrow
+     *  @param  _collateralAmount Amount of collateral to deposit
+     *  @param  _price          Price of the bucket
+     *  @param  _stamp      Whether to stamp the loan or not
+     */
+    function _depositAndDraw(
+        uint256 _debtAmount,
+        uint256 _collateralAmount,
+        uint256 _price,
+        bool _stamp
+    ) internal {
+        summerfiAccount.execute(
+            address(SUMMERFI_AJNA_PROXY_ACTIONS),
+            abi.encodeCall(
+                SUMMERFI_AJNA_PROXY_ACTIONS.depositAndDraw,
+                (ajnaPool, _debtAmount, _collateralAmount, _price, _stamp)
+            )
+        );
+        IWETH(WETH).deposit{value: address(this).balance}(); // summer contracts use Ether not WETH
+    }
+
+    /**
+     *  @notice Repay debt and withdraw collateral via account proxy
+     *  @param  _debtAmount     Amount of debt to repay
+     *  @param  _collateralAmount Amount of collateral to withdraw
+     *  @param  _stamp      Whether to stamp the loan or not
+     */
+    function _repayWithdraw(
+        uint256 _debtAmount,
+        uint256 _collateralAmount,
+        bool _stamp
+    ) internal {
+        IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        summerfiAccount.execute{value: _debtAmount}(
+            address(SUMMERFI_AJNA_PROXY_ACTIONS),
+            abi.encodeCall(
+                SUMMERFI_AJNA_PROXY_ACTIONS.repayWithdraw,
+                (ajnaPool, _debtAmount, _collateralAmount, _stamp)
+            )
+        );
+    }
+
+    /**
+     *  @notice Repay debt and close position via account proxy
+     */
+    function _repayAndClose() internal {
+        // TODO: Consider how to handle Ether <-> WETH Conversion
+        //IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        summerfiAccount.execute(
+            address(SUMMERFI_AJNA_PROXY_ACTIONS),
+            abi.encodeCall(
+                SUMMERFI_AJNA_PROXY_ACTIONS.repayAndClose,
+                (ajnaPool)
+            )
+        );
+    }
+
+    function _unwrappedToWrappedAsset(
+        uint256 _amount
+    ) internal view returns (uint256) {
+        (bool success, bytes memory data) = address(asset).staticcall(
+            abi.encodeWithSelector(unwrappedToWrappedSelector, _amount)
+        );
+        require(success, "!success"); // dev: static call failed
+        return abi.decode(data, (uint256));
+    }
+
+    /************************************************************************
+     *                          LTV Math Functions                          *
+     ************************************************************************/
+
+    // function getBorrowFromDeposit(uint256 _deposit, uint256 _collatRatio)
+    //     internal
+    //     pure
+    //     returns (uint256)
+    // {
+    //     return deposit.mul(collatRatio).div(COLLATERAL_RATIO_PRECISION);
+    // }
+
+    // function getDepositFromBorrow(uint256 _borrow, uint256 _collatRatio)
+    //     internal
+    //     pure
+    //     returns (uint256)
+    // {
+    //     return borrow.mul(COLLATERAL_RATIO_PRECISION).div(collatRatio);
+    // }
+
+    function _getBorrowFromSupply(
+        uint256 _supply,
+        uint256 _collatRatio,
+        uint256 _assetPerWeth
+    ) internal pure returns (uint256) {
+        if (_collatRatio == 0) {
+            return 0;
+        }
+        //return (((_supply * _collatRatio) / (ONE_WAD - _collatRatio)));
+        return
+            (((_supply * _collatRatio) / (ONE_WAD - _collatRatio)) * ONE_WAD) /
+            _assetPerWeth;
+    }
+
+    function _calculateLTV(
+        uint256 _collateralAmount,
+        uint256 _debtAmount,
+        uint256 _assetPerWeth
+    ) internal pure returns (uint256) {
+        if (_collateralAmount == 0 || _debtAmount == 0) {
+            return 0;
+        }
+        return (_debtAmount * _assetPerWeth) / _collateralAmount;
+    }
+
+    // Needed to receive ETH
+    receive() external payable {}
 }

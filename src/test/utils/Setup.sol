@@ -70,6 +70,9 @@ contract Setup is ExtendedTest, IEvents {
         vm.label(tokenAddrs["WETH"], "WETH");
         vm.label(management, "management");
         vm.label(address(strategy), "strategy");
+        vm.label(strategy.ajnaPool(), "ajnaPool");
+        vm.label(strategy.summerfiAccount(), "summerfiAccount");
+        vm.label(strategy.chainlinkOracle(), "cl-oracle");
         vm.label(performanceFeeRecipient, "performanceFeeRecipient");
     }
 

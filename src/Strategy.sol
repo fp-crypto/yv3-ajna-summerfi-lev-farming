@@ -14,6 +14,8 @@ import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IBalancer} from "./interfaces/balancer/IBalancer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
+import "forge-std/console.sol"; // TODO: delete
+
 interface IAccountFactory {
     function createAccount() external returns (address);
 
@@ -98,7 +100,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
 
         LTVConfig memory _ltvs;
-        _ltvs.targetLTV = 0.5e18; // TODO: delete this
+        _ltvs.targetLTV = 0.85e18; // TODO: delete this
         _ltvs.minAdjustThreshold = DEFAULT_MIN_ADJUST_THRESHOLD;
         _ltvs.warningThreshold = DEFAULT_WARNING_THRESHOLD;
         _ltvs.emergencyThreshold = DEFAULT_EMERGENCY_THRESHOLD;
@@ -131,6 +133,18 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         )
     {
         return _positionInfo();
+    }
+
+    function currentLTV() external view returns (uint256) {
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        return _calculateLTV(_debt, _collateral, _assetPerWeth());
+    }
+
+    function estimatedTotalAssets() external view returns (uint256) {
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        uint256 _idle = asset.balanceOf(address(this));
+        return
+            _calculateNetPosition(_debt, _collateral, _assetPerWeth()) + _idle;
     }
 
     /**
@@ -174,9 +188,16 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // TODO: implement withdraw logic EX:
-        //
-        //      lendingPool.withdraw(address(asset), _amount);
+        uint256 _ratio = (_amount * ONE_WAD) / TokenizedStrategy.totalAssets(); // TODO: does totalIdle need to be added to the amount here (ask schlag)
+        (
+            uint256 _debt,
+            uint256 _collateral,
+            ,
+            uint256 _thresholdPrice
+        ) = _positionInfo();
+        uint256 _price = _assetPerWeth();
+
+        _leverDown(_debt, _collateral, _amount, ltvs, _price);
     }
 
     /**
@@ -209,9 +230,8 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         _adjustPosition();
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
-            asset.balanceOf(address(this)) +
-            _collateral -
-            _unwrappedToWrappedAsset(_debt); // TODO: Better conversion from quote to asset
+            _calculateNetPosition(_debt, _collateral, _assetPerWeth()) +
+            asset.balanceOf(address(this));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -376,7 +396,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
         uint256 _price = _assetPerWeth();
-        uint256 _currentLtv = _calculateLTV(_collateral, _debt, _price);
+        uint256 _currentLtv = _calculateLTV(_debt, _collateral, _price);
 
         if (
             positionOpen &&
@@ -391,7 +411,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         }
 
         (_debt, _collateral, , _thresholdPrice) = _positionInfo();
-        _currentLtv = _calculateLTV(_collateral, _debt, _price);
+        _currentLtv = _calculateLTV(_debt, _collateral, _price);
         // TODO: consider what the best check would be
         //require(_currentLtv < _ltvs.targetLTV + _ltvs.minAdjustThreshold); // dev: not safe
     }
@@ -421,6 +441,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         _initFlashLoan(_toBorrow, _flashLoanData);
     }
 
+    // TODO: delete this
+    event LeverDown(uint256 toLoose, uint256 repay);
+    event LeverDownDebug(uint256 debt, uint256 targetBorrow);
+
     /**
      * @notice Levers down
      */
@@ -428,25 +452,40 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         uint256 _debt,
         uint256 _collateral,
         uint256 _collateralToFree,
-        LTVConfig memory _ltvs
+        LTVConfig memory _ltvs,
+        uint256 _assetPerWeth
     ) internal {
         uint256 _repaymentAmount;
-        if (_collateralToFree > _collateral) {
-            _collateralToFree = _collateral;
-        }
+        uint256 _targetBorrow;
 
-        uint256 _targetBorrow = _getBorrowFromSupply(
-            _collateral - _collateralToFree,
-            _ltvs.targetLTV,
-            _assetPerWeth()
+        uint256 _supply = _calculateNetPosition(
+            _debt,
+            _collateral,
+            _assetPerWeth
         );
 
+        if (_collateralToFree < _supply) {
+            _targetBorrow = _getBorrowFromSupply(
+                _supply - _collateralToFree,
+                _ltvs.targetLTV,
+                _assetPerWeth
+            );
+        }
+
         require(_targetBorrow <= _debt); // dev: something is very wrong
+        emit LeverDownDebug(_debt, _targetBorrow);
         _repaymentAmount = _debt - _targetBorrow;
-        uint256 _collateralToWithdraw = _collateralToFree +
-            ((_unwrappedToWrappedAsset(_repaymentAmount) *
-                (MAX_BPS + slippageAllowedBps)) / MAX_BPS); // TODO: This calculation is wrong
+
+        uint256 _collateralToWithdraw = ((((_repaymentAmount * _assetPerWeth) /
+            ONE_WAD) * (MAX_BPS + slippageAllowedBps)) / MAX_BPS) +
+            _collateralToFree;
+        if (_collateralToWithdraw > _collateral) {
+            _collateralToWithdraw = _collateral;
+        }
+
         bytes memory _flashLoanData = abi.encode(false, _collateralToWithdraw);
+        emit LeverDown(_collateralToFree, _repaymentAmount);
+        emit LeverDown(_collateralToWithdraw, _repaymentAmount);
         _initFlashLoan(_repaymentAmount, _flashLoanData);
     }
 
@@ -503,7 +542,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             // TODO: lever down logic
             _repayWithdraw(_debtAmount, _collateralAmount, false);
             // Exact output swap
-            _swapTo(address(asset), WETH, _debtAmount, 0); // TODO: set maxIn to a slippage value
+            _swapTo(address(asset), WETH, _debtAmount, _collateralAmount); // TODO: set maxIn to a slippage value
         }
         // Repay flashloan
         ERC20(WETH).safeTransfer(address(BALANCER_VAULT), _debtAmount);
@@ -670,21 +709,45 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         if (_collatRatio == 0) {
             return 0;
         }
-        //return (((_supply * _collatRatio) / (ONE_WAD - _collatRatio)));
         return
             (((_supply * _collatRatio) / (ONE_WAD - _collatRatio)) * ONE_WAD) /
             _assetPerWeth;
     }
 
+    function _getBorrowFromCollateral(
+        uint256 _collateral,
+        uint256 _collatRatio,
+        uint256 _assetPerWeth
+    ) internal pure returns (uint256) {
+        if (_collatRatio == 0) {
+            return 0;
+        }
+        return (_collateral * _collatRatio) / _assetPerWeth;
+    }
+
     function _calculateLTV(
-        uint256 _collateralAmount,
         uint256 _debtAmount,
+        uint256 _collateralAmount,
         uint256 _assetPerWeth
     ) internal pure returns (uint256) {
         if (_collateralAmount == 0 || _debtAmount == 0) {
             return 0;
         }
         return (_debtAmount * _assetPerWeth) / _collateralAmount;
+    }
+
+    function _calculateNetPosition(
+        uint256 _debt,
+        uint256 _collateral,
+        uint256 _assetPerWeth
+    ) internal pure returns (uint256) {
+        _debt = (_debt * _assetPerWeth) / ONE_WAD;
+        if (_debt >= _collateral || _collateral == 0) {
+            return 0;
+        }
+        unchecked {
+            return _collateral - _debt;
+        }
     }
 
     // Needed to receive ETH

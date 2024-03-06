@@ -2,6 +2,7 @@
 pragma solidity ^0.8.18;
 
 import "forge-std/console.sol";
+import "./utils/Helpers.sol";
 import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 
 contract OperationTest is Setup {
@@ -19,8 +20,9 @@ contract OperationTest is Setup {
         // TODO: add additional check on strat params
     }
 
-    function test_operation(uint256 _amount) public {
-        _amount = 10e18;// _amount > minFuzzAmount && _amount < maxFuzzAmount);
+    function test_operation() public /*uint256 _amount*/
+    {
+        uint256 _amount = 10e18; // vm.assumer(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -30,6 +32,8 @@ contract OperationTest is Setup {
         assertEq(strategy.totalDebt(), 0, "!totalDebt");
         assertEq(strategy.totalIdle(), _amount, "!totalIdle");
 
+        Helpers.logStrategyInfo(strategy);
+
         vm.prank(keeper);
         strategy.tend();
 
@@ -37,8 +41,17 @@ contract OperationTest is Setup {
         assertEq(strategy.totalDebt(), _amount, "!totalDebt");
         assertEq(strategy.totalIdle(), 0, "!totalIdle");
 
+        Helpers.logStrategyInfo(strategy);
+
         // Earn Interest
         skip(1 days);
+        vm.mockCall(
+            address(0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0),
+            abi.encodeWithSelector(bytes4(0xb0e38900)),
+            abi.encode(5)
+        );
+
+        Helpers.logStrategyInfo(strategy);
 
         // Report profit
         vm.prank(keeper);
@@ -47,6 +60,8 @@ contract OperationTest is Setup {
         // Check return Values
         assertGe(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
+
+        Helpers.logStrategyInfo(strategy);
 
         skip(strategy.profitMaxUnlockTime());
 
@@ -61,12 +76,13 @@ contract OperationTest is Setup {
             balanceBefore + _amount,
             "!final balance"
         );
+
+        Helpers.logStrategyInfo(strategy);
     }
 
-    function test_profitableReport(
-        uint256 _amount,
-        uint16 _profitFactor
-    ) public {
+    function test_profitableReport(uint256 _amount, uint16 _profitFactor)
+        public
+    {
         vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
         _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
 

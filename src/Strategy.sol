@@ -85,8 +85,6 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         bool _oracleWrapped
     ) BaseStrategy(_asset, _name) {
         require(_asset == IERC20Pool(_ajnaPool).collateralAddress(), "!collat"); // dev: asset must be collateral
-
-        address _quoteToken = IERC20Pool(_ajnaPool).quoteTokenAddress();
         require(WETH == IERC20Pool(_ajnaPool).quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
 
         address _summerfiAccount = SUMMERFI_ACCOUNT_FACTORY.createAccount();
@@ -137,14 +135,15 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
 
     function currentLTV() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        return _calculateLTV(_debt, _collateral, _assetPerWeth());
+        return _calculateLTV(_debt, _collateral, _getAssetPerWeth());
     }
 
     function estimatedTotalAssets() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _idle = asset.balanceOf(address(this));
         return
-            _calculateNetPosition(_debt, _collateral, _assetPerWeth()) + _idle;
+            _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
+            _idle;
     }
 
     /**
@@ -188,15 +187,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        uint256 _ratio = (_amount * ONE_WAD) / TokenizedStrategy.totalAssets(); // TODO: does totalIdle need to be added to the amount here (ask schlag)
-        (
-            uint256 _debt,
-            uint256 _collateral,
-            ,
-            uint256 _thresholdPrice
-        ) = _positionInfo();
-        uint256 _price = _assetPerWeth();
-
+        // TODO: figure out ratio stuff
+        //uint256 _ratio = (_amount * ONE_WAD) / TokenizedStrategy.totalAssets(); // TODO: does totalIdle need to be added to the amount here (ask schlag)
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        uint256 _price = _getAssetPerWeth();
         _leverDown(_debt, _collateral, _amount, ltvs, _price);
     }
 
@@ -227,10 +221,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         override
         returns (uint256 _totalAssets)
     {
-        _adjustPosition();
+        _adjustPosition(asset.balanceOf(address(this)));
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
-            _calculateNetPosition(_debt, _collateral, _assetPerWeth()) +
+            _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
             asset.balanceOf(address(this));
     }
 
@@ -263,7 +257,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      *
      */
     function _tend(uint256 _totalIdle) internal override {
-        _adjustPosition();
+        _adjustPosition(_totalIdle);
     }
 
     /**
@@ -297,18 +291,15 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      * @return . The available amount the `_owner` can deposit in terms of `asset`
      *
      */
-    function availableDepositLimit(address _owner)
-        public
-        view
-        override
-        returns (uint256)
-    {
+    function availableDepositLimit(
+        address /*_owner */
+    ) public view override returns (uint256) {
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
         return _totalAssets >= depositLimit ? 0 : depositLimit - _totalAssets;
     }
 
     /**
-     * @dev Claims summerfi ajna rewards
+     * @notice Claims summerfi ajna rewards
      *
      * Unguarded because there is no risk claiming
      *
@@ -323,34 +314,6 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     ) external {
         SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
     }
-
-    /**
-     * @notice Gets the max amount of `asset` that can be withdrawn.
-     * @dev Defaults to an unlimited amount for any address. But can
-     * be overridden by strategists.
-     *
-     * This function will be called before any withdraw or redeem to enforce
-     * any limits desired by the strategist. This can be used for illiquid
-     * or sandwichable strategies. It should never be lower than `totalIdle`.
-     *
-     *   EX:
-     *       return TokenIzedStrategy.totalIdle();
-     *
-     * This does not need to take into account the `_owner`'s share balance
-     * or conversion rates from shares to assets.
-     *
-     * @param . The address that is withdrawing from the strategy.
-     * @return . The available amount that can be withdrawn in terms of `asset`
-     *
-    function availableWithdrawLimit(
-        address _owner
-    ) public view override returns (uint256) {
-        TODO: If desired Implement withdraw limit logic and any needed state variables.
-        
-        EX:    
-            return TokenizedStrategy.totalIdle();
-    }
-    */
 
     /**
      * @dev Optional function for a strategist to override that will
@@ -373,21 +336,16 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      *
      * @param _amount The amount of asset to attempt to free.
      *
+     */
     function _emergencyWithdraw(uint256 _amount) internal override {
-        TODO: If desired implement simple logic to free deployed funds.
-
-        EX:
-            _amount = min(_amount, aToken.balanceOf(address(this)));
-            _freeFunds(_amount);
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        _leverDown(_debt, _collateral, _amount, ltvs, _getAssetPerWeth());
     }
-
-    **/
 
     /**
      * @notice Adjusts the leveraged position
      */
-    function _adjustPosition() internal {
-        uint256 _totalIdle = asset.balanceOf(address(this));
+    function _adjustPosition(uint256 _totalIdle) internal {
         (
             uint256 _debt,
             uint256 _collateral,
@@ -395,7 +353,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             uint256 _thresholdPrice
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
-        uint256 _price = _assetPerWeth();
+        uint256 _price = _getAssetPerWeth();
         uint256 _currentLtv = _calculateLTV(_debt, _collateral, _price);
 
         if (
@@ -403,7 +361,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             (_price <= _thresholdPrice ||
                 _currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold)
         ) {
-            //_leverDown(_debt, _collateral, 0, _ltvs);
+            _leverDown(_debt, _collateral, 0, _ltvs, _price);
         } else if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
             _leverUp(_debt, _collateral, _totalIdle, _ltvs, _price);
         } else {
@@ -436,7 +394,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         );
         require(_targetBorrow > _debt); // dev: something is very wrong
         uint256 _toBorrow = _targetBorrow - _debt;
-        bytes memory _flashLoanData = abi.encode(true, uint256(0));
+        bytes memory _flashLoanData = abi.encode(
+            FlashloanAction.LeverUp,
+            uint256(0)
+        );
         emit LeverUp(_toBorrow, _collateral + _totalIdle, _ltvs.targetLTV);
         _initFlashLoan(_toBorrow, _flashLoanData);
     }
@@ -483,13 +444,25 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             _collateralToWithdraw = _collateral;
         }
 
-        bytes memory _flashLoanData = abi.encode(false, _collateralToWithdraw);
+        bytes memory _flashLoanData = abi.encode(
+            _repaymentAmount == _debt
+                ? FlashloanAction.ClosePosition
+                : FlashloanAction.LeverDown,
+            _collateralToWithdraw
+        );
         emit LeverDown(_collateralToFree, _repaymentAmount);
         emit LeverDown(_collateralToWithdraw, _repaymentAmount);
         _initFlashLoan(_repaymentAmount, _flashLoanData);
     }
 
     // ----------------- FLASHLOAN -----------------
+
+    enum FlashloanAction {
+        LeverUp,
+        LeverDown,
+        ClosePosition
+    }
+
     /**
      *  @notice Initiate flash loan via balancer
      *  @param  _amount     Amount to flashloan
@@ -521,12 +494,12 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         flashloanActive = false;
         uint256 _fee = _fees[0];
         require(_fee <= expectedFlashloanFee); // dev: flashloan fee too high
-        (bool _leverUp, uint256 _collateralAmount) = abi.decode(
+        (FlashloanAction _action, uint256 _collateralAmount) = abi.decode(
             _data,
-            (bool, uint256)
+            (FlashloanAction, uint256)
         );
         uint256 _debtAmount = _amounts[0];
-        if (_leverUp) {
+        if (_action == FlashloanAction.LeverUp) {
             // Exact input swap
             _swapFrom(WETH, address(asset), _debtAmount, 0); // TODO: set minOut to a slippage value
             uint256 _collateralToAdd = asset.balanceOf(address(this));
@@ -536,11 +509,14 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             } else {
                 _depositAndDraw(_debtAmount, _collateralToAdd, ONE_WAD, false);
             }
-        }
-        /* leverDown */
-        else {
+        } else if (_action == FlashloanAction.LeverDown) {
             // TODO: lever down logic
             _repayWithdraw(_debtAmount, _collateralAmount, false);
+            // Exact output swap
+            _swapTo(address(asset), WETH, _debtAmount, _collateralAmount); // TODO: set maxIn to a slippage value
+        } else if (_action == FlashloanAction.ClosePosition) {
+            // TODO: lever down logic
+            _repayAndClose(_debtAmount);
             // Exact output swap
             _swapTo(address(asset), WETH, _debtAmount, _collateralAmount); // TODO: set maxIn to a slippage value
         }
@@ -576,7 +552,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      *  @notice Retrieves the oracle rate asset/quoteToken
      *  @return Conversion rate
      */
-    function _assetPerWeth() internal view returns (uint256) {
+    function _getAssetPerWeth() internal view returns (uint256) {
         uint256 _answer = (ONE_WAD**2) /
             uint256(chainlinkOracle.latestAnswer());
         if (oracleWrapped) {
@@ -657,9 +633,8 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     /**
      *  @notice Repay debt and close position via account proxy
      */
-    function _repayAndClose() internal {
-        // TODO: Consider how to handle Ether <-> WETH Conversion
-        //IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+    function _repayAndClose(uint256 _debtAmount) internal {
+        IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
         summerfiAccount.execute(
             address(SUMMERFI_AJNA_PROXY_ACTIONS),
             abi.encodeCall(
@@ -667,6 +642,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
                 (ajnaPool)
             )
         );
+        uint256 _balance = address(this).balance;
+        if (_balance != 0) {
+            IWETH(WETH).deposit{value: _balance}();
+        }
     }
 
     function _unwrappedToWrappedAsset(uint256 _amount)
@@ -682,24 +661,8 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     }
 
     /************************************************************************
-     *                          LTV Math Functions                          *
+     *                      Position Math Functions                         *
      ************************************************************************/
-
-    // function getBorrowFromDeposit(uint256 _deposit, uint256 _collatRatio)
-    //     internal
-    //     pure
-    //     returns (uint256)
-    // {
-    //     return deposit.mul(collatRatio).div(COLLATERAL_RATIO_PRECISION);
-    // }
-
-    // function getDepositFromBorrow(uint256 _borrow, uint256 _collatRatio)
-    //     internal
-    //     pure
-    //     returns (uint256)
-    // {
-    //     return borrow.mul(COLLATERAL_RATIO_PRECISION).div(collatRatio);
-    // }
 
     function _getBorrowFromSupply(
         uint256 _supply,
@@ -712,17 +675,6 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         return
             (((_supply * _collatRatio) / (ONE_WAD - _collatRatio)) * ONE_WAD) /
             _assetPerWeth;
-    }
-
-    function _getBorrowFromCollateral(
-        uint256 _collateral,
-        uint256 _collatRatio,
-        uint256 _assetPerWeth
-    ) internal pure returns (uint256) {
-        if (_collatRatio == 0) {
-            return 0;
-        }
-        return (_collateral * _collatRatio) / _assetPerWeth;
     }
 
     function _calculateLTV(

@@ -44,7 +44,7 @@ contract Setup is ExtendedTest, IEvents {
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
     uint256 public maxFuzzAmount = 10e18;
-    uint256 public minFuzzAmount = 7e18;
+    uint256 public minFuzzAmount = 2e18;
 
     // Default profit max unlock time is set for 10 days
     uint256 public profitMaxUnlockTime = 10 days;
@@ -101,7 +101,7 @@ contract Setup is ExtendedTest, IEvents {
         vm.prank(management);
         _strategy.acceptManagement();
 
-        supplyQuote(100e18, getAjnaPoolForAsset(address(asset)));
+        supplyQuote(maxFuzzAmount * 10, getAjnaPoolForAsset(address(asset)));
 
         return address(_strategy);
     }
@@ -120,6 +120,7 @@ contract Setup is ExtendedTest, IEvents {
 
     function getAjnaPoolForAsset(address _asset)
         public
+        view
         returns (address _pool)
     {
         ERC20PoolFactory ajnaFactory = ERC20PoolFactory(

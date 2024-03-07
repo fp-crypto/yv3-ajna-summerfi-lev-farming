@@ -4,6 +4,8 @@ pragma solidity 0.8.18;
 import {IStrategy} from "@tokenized-strategy/interfaces/IStrategy.sol";
 
 interface IStrategyInterface is IStrategy {
+    function WETH() external view returns (address);
+
     function summerfiAccount() external view returns (address);
 
     function ajnaPool() external view returns (address);
@@ -40,4 +42,20 @@ interface IStrategyInterface is IStrategy {
     function currentLTV() external view returns (uint256 _ltv);
 
     function estimatedTotalAssets() external view returns (uint256 _eta);
+
+    function uniFees(address, address) external view returns (uint24);
+
+    function router() external view returns (address);
+
+    function setLtvConfig(LTVConfig memory _ltvs) external;
+
+    function setUniFee(address _token, uint24 _fee) external;
+
+    function setDepositLimit(uint256 _depositLimit) external;
+
+    function setExpectedFlashloanFee(uint16 _maxFlashloanFeeBps) external;
+
+    function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
+
+    function setMaxTendBasefee(uint256 _maxTendBasefee) external;
 }

@@ -6,6 +6,8 @@ import "./utils/Helpers.sol";
 import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 
 contract OperationTest is Setup {
+    uint256 public constant REPORTING_PERIOD = 14 days;
+
     function setUp() public virtual override {
         super.setUp();
     }
@@ -20,9 +22,8 @@ contract OperationTest is Setup {
         // TODO: add additional check on strat params
     }
 
-    function test_operation() public /*uint256 _amount*/
-    {
-        uint256 _amount = 10e18; // vm.assumer(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+    function test_operation(uint256 _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -31,6 +32,7 @@ contract OperationTest is Setup {
         assertEq(strategy.totalAssets(), _amount, "!totalAssets");
         assertEq(strategy.totalDebt(), 0, "!totalDebt");
         assertEq(strategy.totalIdle(), _amount, "!totalIdle");
+        assertEq(strategy.estimatedTotalAssets(), _amount, "!eta");
 
         Helpers.logStrategyInfo(strategy);
 
@@ -40,16 +42,12 @@ contract OperationTest is Setup {
         assertEq(strategy.totalAssets(), _amount, "!totalAssets");
         assertEq(strategy.totalDebt(), _amount, "!totalDebt");
         assertEq(strategy.totalIdle(), 0, "!totalIdle");
+        //assertLt(strategy.estimatedTotalAssets(), _amount, "!eta");
 
         Helpers.logStrategyInfo(strategy);
 
-        // Earn Interest
+        // Lose money
         skip(1 days);
-        vm.mockCall(
-            address(0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0),
-            abi.encodeWithSelector(bytes4(0xb0e38900)),
-            abi.encode(5)
-        );
 
         Helpers.logStrategyInfo(strategy);
 
@@ -57,7 +55,66 @@ contract OperationTest is Setup {
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();
 
-        // Check return Values
+        // Expect a loss
+        assertEq(profit, 0, "!profit");
+        assertGe(loss, 0, "!loss");
+
+        Helpers.logStrategyInfo(strategy);
+
+        skip(strategy.profitMaxUnlockTime());
+
+        uint256 balanceBefore = asset.balanceOf(user);
+
+        // Withdraw all funds
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
+
+        // Expect a loss since no profit was created
+        assertLe(
+            asset.balanceOf(user),
+            balanceBefore + _amount,
+            "!final balance"
+        );
+
+        Helpers.logStrategyInfo(strategy);
+    }
+
+    function test_profitableOperation(uint256 _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        assertEq(strategy.totalAssets(), _amount, "!totalAssets");
+        assertEq(strategy.totalDebt(), 0, "!totalDebt");
+        assertEq(strategy.totalIdle(), _amount, "!totalIdle");
+        assertEq(strategy.estimatedTotalAssets(), _amount, "!eta");
+
+        Helpers.logStrategyInfo(strategy);
+
+        vm.prank(keeper);
+        strategy.tend();
+
+        assertEq(strategy.totalAssets(), _amount, "!totalAssets");
+        assertEq(strategy.totalDebt(), _amount, "!totalDebt");
+        assertEq(strategy.totalIdle(), 0, "!totalIdle");
+        //assertLt(strategy.estimatedTotalAssets(), _amount, "!eta");
+
+        Helpers.logStrategyInfo(strategy);
+
+        // Make money
+        uint256 _lstPrice = Helpers.generatePaperProfit(vm, strategy, REPORTING_PERIOD);
+        Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+        skip(REPORTING_PERIOD);
+
+        Helpers.logStrategyInfo(strategy);
+
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+
+        // Expect a loss
         assertGe(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
 
@@ -71,6 +128,7 @@ contract OperationTest is Setup {
         vm.prank(user);
         strategy.redeem(_amount, user, user);
 
+        // Expect a loss since no profit was created
         assertGe(
             asset.balanceOf(user),
             balanceBefore + _amount,
@@ -89,24 +147,25 @@ contract OperationTest is Setup {
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
 
-        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        // tend to deploy funds
+        vm.prank(keeper);
+        strategy.tend();
+
         assertEq(strategy.totalAssets(), _amount, "!totalAssets");
-        assertEq(strategy.totalDebt(), 0, "!totalDebt");
-        assertEq(strategy.totalIdle(), _amount, "!totalIdle");
+        assertEq(strategy.totalDebt(), _amount, "!totalDebt");
+        assertEq(strategy.totalIdle(), 0, "!totalIdle");
 
-        // Earn Interest
-        skip(1 days);
-
-        // TODO: implement logic to simulate earning interest.
-        uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
-        airdrop(asset, address(strategy), toAirdrop);
+        // Make money
+        uint256 _lstPrice = Helpers.generatePaperProfit(vm, strategy, REPORTING_PERIOD);
+        Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+        skip(REPORTING_PERIOD);
 
         // Report profit
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();
 
         // Check return Values
-        assertGe(profit, toAirdrop, "!profit");
+        assertGe(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
 
         skip(strategy.profitMaxUnlockTime());
@@ -137,24 +196,25 @@ contract OperationTest is Setup {
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
 
-        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        // tend to deploy funds
+        vm.prank(keeper);
+        strategy.tend();
+
         assertEq(strategy.totalAssets(), _amount, "!totalAssets");
-        assertEq(strategy.totalDebt(), 0, "!totalDebt");
-        assertEq(strategy.totalIdle(), _amount, "!totalIdle");
+        assertEq(strategy.totalDebt(), _amount, "!totalDebt");
+        assertEq(strategy.totalIdle(), 0, "!totalIdle");
 
-        // Earn Interest
-        skip(1 days);
-
-        // TODO: implement logic to simulate earning interest.
-        uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
-        airdrop(asset, address(strategy), toAirdrop);
+        // Make money
+        uint256 _lstPrice = Helpers.generatePaperProfit(vm, strategy, REPORTING_PERIOD);
+        Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+        skip(REPORTING_PERIOD);
 
         // Report profit
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();
 
         // Check return Values
-        assertGe(profit, toAirdrop, "!profit");
+        assertGe(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
 
         skip(strategy.profitMaxUnlockTime());

@@ -43,6 +43,11 @@ interface IStrategyInterface is IStrategy {
 
     function estimatedTotalAssets() external view returns (uint256 _eta);
 
+    function estimatedTotalAssetsNoSlippage()
+        external
+        view
+        returns (uint256 _eta);
+
     function uniFees(address, address) external view returns (uint24);
 
     function router() external view returns (address);

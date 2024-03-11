@@ -25,10 +25,15 @@ library Helpers {
         console.log("==== Strategy Info ====");
         console.log("Debt: %i", _debt);
         console.log("Collateral: %i", _collateral);
-        console.log("LTV: %i", strategy.currentLTV());
+        console.log(
+            "LTV (actual/target): %s/%s",
+            strategy.currentLTV(),
+            strategy.ltvs().targetLTV
+        );
         console.log("ETA: %i", strategy.estimatedTotalAssets());
-        console.log("Total Idle: %i", strategy.totalIdle());
         console.log("Total Assets: %i", strategy.totalAssets());
+        console.log("Total Debt: %i", strategy.totalDebt());
+        console.log("Total Idle: %i", strategy.totalIdle());
     }
 
     function generatePaperProfit(
@@ -92,5 +97,9 @@ library Helpers {
         uint256 wethAfter = ERC20(weth).balanceOf(RANDO);
         vm.stopPrank();
         require(wethBefore - wethAfter <= MAX_SWAP_AMOUNT, "!not enough input");
+    }
+
+    function abs(int256 x) internal pure returns (uint256) {
+        return uint256(x >= 0 ? x : -x);
     }
 }

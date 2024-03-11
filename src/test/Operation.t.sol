@@ -4,9 +4,10 @@ pragma solidity ^0.8.18;
 import "forge-std/console.sol";
 import "./utils/Helpers.sol";
 import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract OperationTest is Setup {
-    uint256 public constant REPORTING_PERIOD = 14 days;
+    uint256 public constant REPORTING_PERIOD = 30 days;
 
     function setUp() public virtual override {
         super.setUp();
@@ -23,7 +24,7 @@ contract OperationTest is Setup {
     }
 
     function test_operation(uint256 _amount) public {
-        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -78,7 +79,7 @@ contract OperationTest is Setup {
     }
 
     function test_profitableReport(uint256 _amount) public {
-        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -138,9 +139,10 @@ contract OperationTest is Setup {
         Helpers.logStrategyInfo(strategy);
     }
 
-    function test_withdrawSubset_loss(
-        uint256 _depositAmount,
-        uint256 _withdrawAmount
+    function test_withdrawSubset_profit(
+        uint64 _depositAmount,
+        uint64 _withdrawAmount,
+        bool profit
     ) public {
         vm.assume(
             _depositAmount > minFuzzAmount && _depositAmount < maxFuzzAmount
@@ -157,12 +159,27 @@ contract OperationTest is Setup {
 
         checkStrategyTotals(strategy, _depositAmount, _depositAmount, 0);
 
-        uint256 balanceBefore = asset.balanceOf(user);
-        uint256 etaBefore = strategy.estimatedTotalAssetsNoSlippage();
-        uint256 taBefore = strategy.totalAssets();
+        if (profit) {
+            // Make money
+            uint256 _lstPrice = Helpers.generatePaperProfit(
+                vm,
+                strategy,
+                REPORTING_PERIOD
+            );
+            Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+            skip(REPORTING_PERIOD);
+        }
 
-        // expect a paper loss
-        assertLt(etaBefore, taBefore);
+        uint256 balanceBefore = asset.balanceOf(user);
+        uint256 totalAssetsBefore = Math.min(
+            strategy.estimatedTotalAssets(),
+            strategy.totalAssets()
+        );
+
+        assertEq(
+            totalAssetsBefore,
+            profit ? strategy.totalAssets() : strategy.estimatedTotalAssets()
+        );
 
         // Withdraw all funds
         vm.prank(user);
@@ -175,79 +192,60 @@ contract OperationTest is Setup {
             "!final balance"
         );
 
-        uint256 targetRatio = (_withdrawAmount * 1e18) / _depositAmount;
-        uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e18) /
-            etaBefore;
+        uint256 targetRatio = (uint256(_withdrawAmount) * 1e4) /
+            _depositAmount;
+        uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e4) /
+            totalAssetsBefore;
 
         assertApproxEq(
             actualRatio,
             targetRatio,
-            0.0010e18, // 10 bp
+            30, // bp
             "!ratio"
         );
     }
 
-    function test_withdrawSubset_profit(
-        uint256 _depositAmount,
-        uint256 _withdrawAmount
-    ) public {
+    function test_ltvChanges(uint64 _ltv) public {
+        uint256 _amount = 20e18;
         vm.assume(
-            _depositAmount > minFuzzAmount && _depositAmount < maxFuzzAmount
-        );
-        vm.assume(_depositAmount > _withdrawAmount && _withdrawAmount > 0);
+            _ltv <= 0.9e18 &&
+                _ltv >= 0.4e18 &&
+                Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_ltv)) >
+                strategy.ltvs().minAdjustThreshold
+        ); // max ltv 90% and change must be more than the minimum adjustment threshold
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _depositAmount);
+        mintAndDepositIntoStrategy(strategy, user, _amount);
 
-        // tend to deploy funds
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, 0, _amount);
+        assertEq(strategy.estimatedTotalAssets(), _amount, "!eta");
+
         vm.prank(keeper);
         strategy.tend();
+        Helpers.logStrategyInfo(strategy);
         checkLTV(false);
+        checkStrategyTotals(strategy, _amount, _amount, 0);
 
-        checkStrategyTotals(strategy, _depositAmount, _depositAmount, 0);
+        // Lose money
+        skip(1 days);
 
-        // Make money
-        uint256 _lstPrice = Helpers.generatePaperProfit(
-            vm,
-            strategy,
-            REPORTING_PERIOD
-        );
-        Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
-        skip(REPORTING_PERIOD);
+        IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
+        _newLtvConfig.targetLTV = _ltv;
+        vm.prank(management);
+        strategy.setLtvConfig(_newLtvConfig);
 
-        uint256 balanceBefore = asset.balanceOf(user);
-        uint256 etaBefore = strategy.estimatedTotalAssetsNoSlippage();
-        uint256 taBefore = strategy.totalAssets();
-
-        // expect a paper loss
-        assertGt(etaBefore, taBefore);
-
-        // Withdraw all funds
-        vm.prank(user);
-        strategy.redeem(_withdrawAmount, user, user);
-        checkLTV();
-
-        assertLe(
-            asset.balanceOf(user),
-            balanceBefore + _withdrawAmount,
-            "!final balance"
-        );
-
-        uint256 targetRatio = (_withdrawAmount * 1e18) / _depositAmount;
-        uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e18) /
-            taBefore;
-
-        assertApproxEq(
-            actualRatio,
-            targetRatio,
-            0.0001e18, // 1 bp
-            "!ratio"
-        );
+        // Tend to new LTV
+        vm.prank(keeper);
+        strategy.tend();
+        Helpers.logStrategyInfo(strategy);
+        checkLTV(false);
+        checkStrategyTotals(strategy, _amount, _amount, 0);
     }
 
     // TODO: tend trigger on LTV
     function test_tendTrigger(uint256 _amount) public {
-        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
         return;
 

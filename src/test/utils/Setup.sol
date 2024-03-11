@@ -101,7 +101,7 @@ contract Setup is ExtendedTest, IEvents {
         vm.prank(management);
         _strategy.acceptManagement();
 
-        supplyQuote(maxFuzzAmount * 10, getAjnaPoolForAsset(address(asset)));
+        supplyQuote(maxFuzzAmount * 20, getAjnaPoolForAsset(address(asset)));
 
         return address(_strategy);
     }

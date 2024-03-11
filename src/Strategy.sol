@@ -31,6 +31,12 @@ interface IAccount {
         returns (bytes32);
 }
 
+// TODO:
+//  1. Implement and test manual deleverage
+//  2. Implement swap ajna -> asset
+//  3. Handle slippage in swaps
+//  4. Fully flesh out tend trigger
+
 contract Strategy is BaseStrategy, UniswapV3Swapper {
     using SafeERC20 for ERC20;
 
@@ -75,9 +81,9 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     uint256 private constant ONE_WAD = 1e18;
     uint256 private constant MAX_BPS = 1e4; // 100% in basis points
     uint64 internal constant DEFAULT_MIN_ADJUST_THRESHOLD = 0.005e18;
-    uint64 internal constant DEFAULT_WARNING_THRESHOLD = 0.02e18;
-    uint64 internal constant DEFAULT_EMERGENCY_THRESHOLD = 0.01e18;
-    uint64 internal constant DUST_THRESHOLD = 100;//0.00001e18;
+    uint64 internal constant DEFAULT_WARNING_THRESHOLD = 0.01e18;
+    uint64 internal constant DEFAULT_EMERGENCY_THRESHOLD = 0.02e18;
+    uint64 internal constant DUST_THRESHOLD = 100; //0.00001e18;
 
     constructor(
         address _asset,
@@ -176,12 +182,13 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
      */
     function estimatedTotalAssets() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        // increase debt by max slippage, since we must swap all debt to exit our position
-        _debt = (_debt * (slippageAllowedBps + MAX_BPS)) / MAX_BPS;
         uint256 _idle = asset.balanceOf(address(this));
         return
-            _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
-            _idle;
+            _calculateNetPositionWithMaxSlippage(
+                _debt,
+                _collateral,
+                _getAssetPerWeth()
+            ) + _idle;
     }
 
     /**
@@ -250,7 +257,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             _price
         );
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
-        if (_positionValue < _totalAssets) {
+        if (_amount != _totalAssets && _positionValue < _totalAssets) {
             _amount = (_amount * _positionValue) / _totalAssets;
         }
         _leverDown(_debt, _collateral, _amount, ltvs, _price);
@@ -294,7 +301,11 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         _adjustPosition(asset.balanceOf(address(this)));
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
-            _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
+            _calculateNetPositionWithMaxSlippage(
+                _debt,
+                _collateral,
+                _getAssetPerWeth()
+            ) +
             asset.balanceOf(address(this));
     }
 
@@ -476,24 +487,25 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             uint256 _thresholdPrice
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
-        uint256 _price = _getAssetPerWeth();
-        uint256 _currentLtv = _calculateLTV(_debt, _collateral, _price);
+        uint256 _assetPerWeth = _getAssetPerWeth();
+        uint256 _wethPerAsset = ONE_WAD**2 / _assetPerWeth;
+        uint256 _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
 
         if (
             positionOpen &&
-            (_price <= _thresholdPrice ||
+            (_wethPerAsset <= _thresholdPrice ||
                 _currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold)
         ) {
-            _leverDown(_debt, _collateral, 0, _ltvs, _price);
+            _leverDown(_debt, _collateral, 0, _ltvs, _assetPerWeth);
         } else if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
-            _leverUp(_debt, _collateral, _totalIdle, _ltvs, _price);
+            _leverUp(_debt, _collateral, _totalIdle, _ltvs, _assetPerWeth);
         } else {
             return; // bail out if we are doing nothing
         }
 
         (_debt, _collateral, , _thresholdPrice) = _positionInfo();
 
-        _currentLtv = _calculateLTV(_debt, _collateral, _price);
+        _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
         require(
             _currentLtv < _ltvs.targetLTV + _ltvs.minAdjustThreshold,
             "!ltv"
@@ -510,8 +522,14 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         LTVConfig memory _ltvs,
         uint256 _assetPerWeth
     ) internal {
+        uint256 _supply = _calculateNetPosition(
+            _debt,
+            _collateral,
+            _assetPerWeth
+        );
+
         uint256 _targetBorrow = _getBorrowFromSupply(
-            _collateral + _totalIdle,
+            _supply + _totalIdle,
             _ltvs.targetLTV,
             _assetPerWeth
         );
@@ -522,6 +540,11 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
 
         require(_targetBorrow > _debt); // dev: something is very wrong
         uint256 _toBorrow = _targetBorrow - _debt;
+
+        if (_targetBorrow < _minLoanSize()) {
+            return;
+        }
+
         bytes memory _flashLoanData = abi.encode(
             FlashloanAction.LeverUp,
             uint256(0)
@@ -664,6 +687,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             _data,
             (FlashloanAction, uint256)
         );
+
+        // uint256 slippageValue = (((_debtPlusFee *
+        //     (MAX_BPS - slippageAllowedBps)) / MAX_BPS) * _getAssetPerWeth()) /
+        //     ONE_WAD;
 
         if (_action == FlashloanAction.LeverUp) {
             // Exact input swap
@@ -864,6 +891,16 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             return 0;
         }
         return (_debt * _assetPerWeth) / _collateral;
+    }
+
+    function _calculateNetPositionWithMaxSlippage(
+        uint256 _debt,
+        uint256 _collateral,
+        uint256 _assetPerWeth
+    ) internal view returns (uint256) {
+        // inflate debt by max slippage value
+        _debt = (_debt * (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
+        return _calculateNetPosition(_debt, _collateral, _assetPerWeth);
     }
 
     function _calculateNetPosition(

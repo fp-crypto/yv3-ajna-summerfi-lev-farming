@@ -64,7 +64,7 @@ library Helpers {
         IStrategyInterface strategy,
         uint256 _lstValue
     ) internal {
-        ISwapRouter router = ISwapRouter(strategy.router());
+        ISwapRouter router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
         address weth = strategy.WETH();
         address asset = strategy.asset();
 
@@ -80,7 +80,7 @@ library Helpers {
             .ExactInputSingleParams(
                 weth, // tokenIn
                 asset, // tokenOut
-                strategy.uniFees(weth, asset), // from-to fee
+                100, // from-to fee
                 address(this), // recipient
                 block.timestamp, // deadline
                 MAX_SWAP_AMOUNT, // amountIn

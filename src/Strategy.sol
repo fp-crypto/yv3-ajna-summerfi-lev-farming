@@ -2,10 +2,11 @@
 pragma solidity 0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
-import {UniswapV3Swapper} from "@periphery/swappers/UniswapV3Swapper.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
+import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
+import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
 
 import {IStrategyInterface} from "./interfaces/IStrategyInterface.sol";
 import {IWETH} from "./interfaces/IWeth.sol";
@@ -37,7 +38,7 @@ interface IAccount {
 //  3. Handle slippage in swaps
 //  4. Fully flesh out tend trigger
 
-contract Strategy is BaseStrategy, UniswapV3Swapper {
+contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     using SafeERC20 for ERC20;
 
     IAccountFactory private constant SUMMERFI_ACCOUNT_FACTORY =
@@ -62,11 +63,12 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
 
     bytes4 private immutable unwrappedToWrappedSelector;
 
+    IUniswapV3Pool public uniswapPool;
     bool private flashloanActive;
     bool private positionOpen;
 
     uint16 public maxFlashloanFeeBps;
-    uint16 public slippageAllowedBps = 10;
+    uint16 public slippageAllowedBps = 50;
     uint256 public depositLimit;
     uint256 public maxTendBasefee = 30e9;
 
@@ -85,10 +87,17 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     uint64 internal constant DEFAULT_EMERGENCY_THRESHOLD = 0.02e18;
     uint64 internal constant DUST_THRESHOLD = 100; //0.00001e18;
 
+    /// @dev The minimum value that can be returned from #getSqrtRatioAtTick. Equivalent to getSqrtRatioAtTick(MIN_TICK)
+    uint160 internal constant UNISWAP_MIN_SQRT_RATIO = 4295128739;
+    /// @dev The maximum value that can be returned from #getSqrtRatioAtTick. Equivalent to getSqrtRatioAtTick(MAX_TICK)
+    uint160 internal constant UNISWAP_MAX_SQRT_RATIO =
+        1461446703485210103287273052203988822378723970342;
+
     constructor(
         address _asset,
         string memory _name,
         address _ajnaPool,
+        address _uniswapPool,
         bytes4 _unwrappedToWrappedSelector,
         address _chainlinkOracle,
         bool _oracleWrapped
@@ -115,8 +124,7 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
 
         depositLimit = 2**256 - 1; // TODO: delete this
 
-        _setUniFees(_asset, WETH, 100);
-        _setUniFees(AJNA_TOKEN, WETH, 10000);
+        _setUniswapPool(IUniswapV3Pool(_uniswapPool));
     }
 
     function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
@@ -124,9 +132,21 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         ltvs = _ltvs;
     }
 
-    function setUniFee(address _token, uint24 _fee) external onlyManagement {
-        require(_token == address(asset) || _token == AJNA_TOKEN); // dev: must be asset or ajna token
-        _setUniFees(_token, WETH, _fee);
+    function setUniswapPool(address _uniswapPool) external onlyManagement {
+        _setUniswapPool(IUniswapV3Pool(_uniswapPool));
+    }
+
+    function _setUniswapPool(IUniswapV3Pool _uniswapPool) internal {
+        require(
+            _uniswapPool.token0() == address(asset) ||
+                _uniswapPool.token1() == address(asset)
+        ); // dev: pool must contain asset
+        require(
+            _uniswapPool.token0() == address(WETH) ||
+                _uniswapPool.token1() == address(WETH)
+        ); // dev: pool must contain weth
+        uniswapPool = _uniswapPool;
+        console.log("up: %s", address(uniswapPool));
     }
 
     function setDepositLimit(uint256 _depositLimit) external onlyManagement {
@@ -155,6 +175,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
     {
         maxTendBasefee = _maxTendBasefee;
     }
+
+    /*******************************************
+     *          PUBLIC VIEW FUNCTIONS          *
+     *******************************************/
 
     function positionInfo()
         external
@@ -512,6 +536,12 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         ); // dev: not safe
     }
 
+    enum LeverAction {
+        LeverUp,
+        LeverDown,
+        ClosePosition
+    }
+
     /**
      * @notice Levers up
      */
@@ -546,10 +576,10 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
         }
 
         bytes memory _flashLoanData = abi.encode(
-            FlashloanAction.LeverUp,
+            LeverAction.LeverUp,
             uint256(0)
         );
-        _initFlashLoan(_toBorrow, _flashLoanData);
+        _swapExactWethIn(_toBorrow, _flashLoanData);
     }
 
     /**
@@ -597,126 +627,141 @@ contract Strategy is BaseStrategy, UniswapV3Swapper {
             return;
         }
 
-        // collateral to withdraw is the repaymentAmount converted to asset and
-        // adjusted for slippage plus the amount requested to be freed
-        uint256 _collateralToWithdraw = ((((_repaymentAmount * _assetPerWeth) /
-            ONE_WAD) * (MAX_BPS + slippageAllowedBps)) / MAX_BPS) +
-            _collateralToFree;
-        if (_collateralToWithdraw > _collateral) {
-            _collateralToWithdraw = _collateral;
-        }
-
-        bytes memory _flashLoanData = abi.encode(
+        bytes memory _swapData = abi.encode(
             _repaymentAmount == _debt
-                ? FlashloanAction.ClosePosition
-                : FlashloanAction.LeverDown,
-            _collateralToWithdraw
+                ? LeverAction.ClosePosition
+                : LeverAction.LeverDown,
+            _collateralToFree
         );
 
         uint256 _idleBefore = asset.balanceOf(address(this));
 
-        _initFlashLoan(_repaymentAmount, _flashLoanData);
+        uint256 _collateralUsed = _swapExactWethOut(
+            _repaymentAmount,
+            _swapData
+        );
 
-        // TODO: consult with Schlag if this is dumb
-        uint256 _idleAfter = asset.balanceOf(address(this));
-        if (
-            _debt != _targetBorrow &&
-            _idleBefore + _collateralToFree < _idleAfter - DUST_THRESHOLD
-        ) {
-            unchecked {
-                _depositAndDraw(
-                    0,
-                    _idleAfter - _collateralToFree - _idleBefore,
+        require(
+            _collateralUsed <=
+                (((_repaymentAmount * (MAX_BPS + slippageAllowedBps)) /
+                    MAX_BPS) * _assetPerWeth) /
                     ONE_WAD,
+            "!slippage"
+        ); // dev: too much slippage
+    }
+
+    /**************************************************
+     *               UNISWAP FUNCTIONS                *
+     **************************************************/
+
+    function _swapExactWethIn(uint256 _amountIn, bytes memory _data)
+        private
+        returns (uint256 _amountOut)
+    {
+        bool zeroForOne = WETH < address(asset);
+
+        (int256 amount0, int256 amount1) = uniswapPool.swap(
+            address(this),
+            zeroForOne,
+            int256(_amountIn),
+            (
+                zeroForOne
+                    ? UNISWAP_MIN_SQRT_RATIO + 1
+                    : UNISWAP_MAX_SQRT_RATIO - 1
+            ),
+            _data
+        );
+
+        return uint256(-(zeroForOne ? amount1 : amount0));
+    }
+
+    function _swapExactWethOut(uint256 _amountOut, bytes memory _data)
+        private
+        returns (uint256 _amountIn)
+    {
+        bool zeroForOne = address(asset) < WETH;
+
+        (int256 amount0Delta, int256 amount1Delta) = uniswapPool.swap(
+            address(this),
+            zeroForOne,
+            -int256(_amountOut),
+            (
+                zeroForOne
+                    ? UNISWAP_MIN_SQRT_RATIO + 1
+                    : UNISWAP_MAX_SQRT_RATIO - 1
+            ),
+            _data
+        );
+
+        uint256 amountOutReceived;
+        (_amountIn, amountOutReceived) = zeroForOne
+            ? (uint256(amount0Delta), uint256(-amount1Delta))
+            : (uint256(amount1Delta), uint256(-amount0Delta));
+        // it's technically possible to not receive the full output amount,
+        // so if no price limit has been specified, require this possibility away
+        require(amountOutReceived == _amountOut);
+    }
+
+    /// @inheritdoc IUniswapV3SwapCallback
+    function uniswapV3SwapCallback(
+        int256 _amount0Delta,
+        int256 _amount1Delta,
+        bytes calldata _data
+    ) external {
+        require(msg.sender == address(uniswapPool)); // dev: callback only called by pool
+        require(_amount0Delta > 0 || _amount1Delta > 0); // dev: swaps entirely within 0-liquidity regions are not supported
+        bool wethGreaterThanAsset = WETH > address(asset);
+
+        (
+            bool isExactInput,
+            uint256 amountToPay,
+            uint256 amountReceived
+        ) = _amount0Delta > 0
+                ? (
+                    !wethGreaterThanAsset,
+                    uint256(_amount0Delta),
+                    uint256(-_amount1Delta)
+                )
+                : (
+                    wethGreaterThanAsset,
+                    uint256(_amount1Delta),
+                    uint256(-_amount0Delta)
+                );
+
+        if (isExactInput) {
+            uint256 _collateralToAdd = asset.balanceOf(address(this));
+            if (!positionOpen) {
+                positionOpen = true;
+                _openPosition(amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
+            } else {
+                _depositAndDraw(amountToPay, _collateralToAdd, ONE_WAD, false);
+            }
+
+            ERC20(WETH).transfer(msg.sender, amountToPay);
+        } else {
+            (LeverAction _action, uint256 _collateralToFree) = abi.decode(
+                _data,
+                (LeverAction, uint256)
+            );
+            require(_action != LeverAction.LeverUp); // dev: WTF
+
+            if (_action == LeverAction.LeverDown) {
+                _repayWithdraw(
+                    amountReceived,
+                    amountToPay + _collateralToFree,
                     false
                 );
+            } else if (_action == LeverAction.ClosePosition) {
+                positionOpen = false;
+                _repayAndClose(amountReceived);
             }
+            asset.transfer(msg.sender, amountToPay);
         }
     }
 
     /**************************************************
-     *              FLASHLOAN FUNCTIONS               *
+     *               INTERNAL VIEWS                   *
      **************************************************/
-
-    enum FlashloanAction {
-        LeverUp,
-        LeverDown,
-        ClosePosition
-    }
-
-    /**
-     *  @notice Initiate flash loan via balancer
-     *  @param  _amount     Amount to flashloan
-     *  @param  _data       Byte array to send with the flashloan
-     */
-    function _initFlashLoan(uint256 _amount, bytes memory _data) internal {
-        address[] memory _tokens = new address[](1);
-        _tokens[0] = address(WETH);
-        uint256[] memory _amounts = new uint256[](1);
-        _amounts[0] = _amount;
-        flashloanActive = true;
-        IBalancer(BALANCER_VAULT).flashLoan(
-            address(this),
-            _tokens,
-            _amounts,
-            _data
-        );
-    }
-
-    /**
-     * @notice flashloan callback
-     */
-    function receiveFlashLoan(
-        ERC20[] calldata,
-        uint256[] calldata _amounts,
-        uint256[] calldata _fees,
-        bytes calldata _data
-    ) external {
-        require(msg.sender == address(BALANCER_VAULT));
-        require(flashloanActive == true);
-        flashloanActive = false;
-
-        uint256 _fee = _fees[0];
-        uint256 _debtAmount = _amounts[0];
-        if (_fee > 0) {
-            require((_fee * MAX_BPS) / _debtAmount <= maxFlashloanFeeBps); // dev: flashloan fee too high
-        }
-        uint256 _debtPlusFee = _debtAmount + _fee; // this is the amount owed to the flashloan provider
-
-        (FlashloanAction _action, uint256 _collateralAmount) = abi.decode(
-            _data,
-            (FlashloanAction, uint256)
-        );
-
-        // uint256 slippageValue = (((_debtPlusFee *
-        //     (MAX_BPS - slippageAllowedBps)) / MAX_BPS) * _getAssetPerWeth()) /
-        //     ONE_WAD;
-
-        if (_action == FlashloanAction.LeverUp) {
-            // Exact input swap
-            _swapFrom(WETH, address(asset), _debtAmount, 0); // TODO: set minOut to a slippage value
-            uint256 _collateralToAdd = asset.balanceOf(address(this));
-            if (!positionOpen) {
-                positionOpen = true;
-                _openPosition(_debtPlusFee, _collateralToAdd, ONE_WAD); // TODO: set real price
-            } else {
-                _depositAndDraw(_debtPlusFee, _collateralToAdd, ONE_WAD, false);
-            }
-        } else if (_action == FlashloanAction.LeverDown) {
-            // TODO: lever down logic
-            _repayWithdraw(_debtAmount, _collateralAmount, false);
-            // Exact output swap
-            _swapTo(address(asset), WETH, _debtPlusFee, _collateralAmount); // TODO: set maxIn to a slippage value
-        } else if (_action == FlashloanAction.ClosePosition) {
-            // TODO: lever down logic
-            _repayAndClose(_debtAmount);
-            // Exact output swap
-            _swapTo(address(asset), WETH, _debtPlusFee, _collateralAmount); // TODO: set maxIn to a slippage value
-            positionOpen = false;
-        }
-        // Repay flashloan
-        ERC20(WETH).safeTransfer(address(BALANCER_VAULT), _debtPlusFee);
-    }
 
     /**
      *  @notice Retrieves info related to our debt position

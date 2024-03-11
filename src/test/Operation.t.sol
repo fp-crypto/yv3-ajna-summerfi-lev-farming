@@ -7,7 +7,7 @@ import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract OperationTest is Setup {
-    uint256 public constant REPORTING_PERIOD = 30 days;
+    uint256 public constant REPORTING_PERIOD = 60 days;
 
     function setUp() public virtual override {
         super.setUp();

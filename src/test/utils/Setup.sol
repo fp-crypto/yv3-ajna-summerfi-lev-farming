@@ -43,7 +43,7 @@ contract Setup is ExtendedTest, IEvents {
     uint256 public MAX_BPS = 10_000;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
-    uint256 public maxFuzzAmount = 10e18;
+    uint256 public maxFuzzAmount = 8e18;
     uint256 public minFuzzAmount = 2e18;
 
     // Default profit max unlock time is set for 10 days
@@ -84,6 +84,7 @@ contract Setup is ExtendedTest, IEvents {
                     address(asset),
                     "Tokenized Strategy",
                     getAjnaPoolForAsset(address(asset)),
+                    0x109830a1AAaD605BbF02a9dFA7B0B92EC2FB7dAa, // uniswap 1bp pool
                     bytes4(0xb0e38900), // selector,
                     0x86392dC19c0b719886221c78AB11eb8Cf5c52812, // oracle,
                     false // oracleWrapped

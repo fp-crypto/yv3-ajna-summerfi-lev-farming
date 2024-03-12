@@ -11,6 +11,7 @@ remappings = [
     "@periphery/=lib/tokenized-strategy-periphery/src/",
     "@ajna-core/=lib/ajna-core/src/",
     "@uniswap-v3-core/=lib/v3-core/contracts/",
+    "@uniswap-v3-periphery/=lib/v3-periphery/contracts/",
     'src/=src/',
 ]
 

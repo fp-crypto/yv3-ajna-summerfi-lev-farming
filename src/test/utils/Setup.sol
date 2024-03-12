@@ -84,7 +84,7 @@ contract Setup is ExtendedTest, IEvents {
                     address(asset),
                     "Tokenized Strategy",
                     getAjnaPoolForAsset(address(asset)),
-                    0x109830a1AAaD605BbF02a9dFA7B0B92EC2FB7dAa, // uniswap 1bp pool
+                    100, // uniswap 1bp pool
                     bytes4(0xb0e38900), // selector,
                     0x86392dC19c0b719886221c78AB11eb8Cf5c52812, // oracle,
                     false // oracleWrapped
@@ -98,6 +98,12 @@ contract Setup is ExtendedTest, IEvents {
         _strategy.setPerformanceFeeRecipient(performanceFeeRecipient);
         // set management of the strategy
         _strategy.setPendingManagement(management);
+        // set deposit limit
+        _strategy.setDepositLimit(2**256-1);
+        IStrategyInterface.LTVConfig memory _ltvConfig = _strategy.ltvs();
+        _ltvConfig.targetLTV = 0.85e18;
+        // set target ltv
+        _strategy.setLtvConfig(_ltvConfig);
 
         vm.prank(management);
         _strategy.acceptManagement();
@@ -153,7 +159,7 @@ contract Setup is ExtendedTest, IEvents {
         vm.prank(ajnaDepositor);
         WETH.approve(_ajnaPool, _amount);
         vm.prank(ajnaDepositor);
-        IERC20Pool(_ajnaPool).addQuoteToken(_amount, 4136, type(uint256).max);
+        IERC20Pool(_ajnaPool).addQuoteToken(_amount, 4130, type(uint256).max);
     }
 
     // For checking the amounts in the strategy

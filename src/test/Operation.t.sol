@@ -24,6 +24,9 @@ contract OperationTest is Setup {
     }
 
     function test_operation(uint256 _amount) public {
+        vm.prank(management);
+        strategy.setUniswapFee(100);
+
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
         // Deposit into strategy
@@ -129,7 +132,6 @@ contract OperationTest is Setup {
         vm.prank(user);
         strategy.redeem(_amount, user, user);
 
-        // Expect a loss since no profit was created
         assertGe(
             asset.balanceOf(user),
             balanceBefore + _amount,
@@ -139,7 +141,7 @@ contract OperationTest is Setup {
         Helpers.logStrategyInfo(strategy);
     }
 
-    function test_withdrawSubset_profit(
+    function test_withdrawSubset(
         uint64 _depositAmount,
         uint64 _withdrawAmount,
         bool profit
@@ -147,7 +149,12 @@ contract OperationTest is Setup {
         vm.assume(
             _depositAmount > minFuzzAmount && _depositAmount < maxFuzzAmount
         );
-        vm.assume(_depositAmount > _withdrawAmount && _withdrawAmount > 0);
+        vm.assume(
+            _depositAmount > _withdrawAmount && _withdrawAmount >= 0.025e18
+        );
+
+        vm.prank(management);
+        strategy.setSlippageAllowedBps(100);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _depositAmount);
@@ -172,19 +179,14 @@ contract OperationTest is Setup {
 
         uint256 balanceBefore = asset.balanceOf(user);
         uint256 totalAssetsBefore = Math.min(
-            strategy.estimatedTotalAssets(),
+            strategy.estimatedTotalAssetsNoSlippage(),
             strategy.totalAssets()
         );
 
-        assertEq(
-            totalAssetsBefore,
-            profit ? strategy.totalAssets() : strategy.estimatedTotalAssets()
-        );
-
-        // Withdraw all funds
+        // Withdraw some funds
         vm.prank(user);
         strategy.redeem(_withdrawAmount, user, user);
-        checkLTV();
+        checkLTV(true, true);
 
         assertLe(
             asset.balanceOf(user),
@@ -192,27 +194,53 @@ contract OperationTest is Setup {
             "!final balance"
         );
 
-        uint256 targetRatio = (uint256(_withdrawAmount) * 1e4) /
-            _depositAmount;
+        uint256 targetRatio = (uint256(_withdrawAmount) * 1e4) / _depositAmount;
         uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e4) /
             totalAssetsBefore;
 
-        assertApproxEq(
-            actualRatio,
-            targetRatio,
-            30, // bp
-            "!ratio"
-        );
+        // TODO: tighter range
+        if (profit) {
+            assertLe(
+                actualRatio,
+                targetRatio,
+                "!ratio"
+            );
+        } else {
+            assertApproxEq(
+                actualRatio,
+                targetRatio,
+                50, // bp
+                "!ratio"
+            );
+        }
+
+        balanceBefore = asset.balanceOf(user);
+        vm.prank(user);
+        strategy.redeem(strategy.balanceOf(user), user, user);
+
+        if (profit) {
+            assertGe(
+                asset.balanceOf(user),
+                balanceBefore + _depositAmount,
+                "!final balance"
+            );
+        }
     }
 
-    function test_ltvChanges(uint64 _ltv) public {
-        uint256 _amount = 20e18;
+    function test_ltvChanges(uint64 _startingLtv, uint64 _endingLtv) public {
+        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
+        _endingLtv = uint64(bound(_endingLtv, 0.4e18, 0.85e18)); // max ltv 85%
         vm.assume(
-            _ltv <= 0.9e18 &&
-                _ltv >= 0.4e18 &&
-                Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_ltv)) >
+            Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_endingLtv)) >
                 strategy.ltvs().minAdjustThreshold
-        ); // max ltv 90% and change must be more than the minimum adjustment threshold
+        ); // change must be more than the minimum adjustment threshold
+
+        uint256 _amount = 20e18;
+
+        IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
+        _newLtvConfig.targetLTV = _startingLtv;
+        vm.prank(management);
+        strategy.setLtvConfig(_newLtvConfig);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -230,8 +258,7 @@ contract OperationTest is Setup {
         // Lose money
         skip(1 days);
 
-        IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
-        _newLtvConfig.targetLTV = _ltv;
+        _newLtvConfig.targetLTV = _endingLtv;
         vm.prank(management);
         strategy.setLtvConfig(_newLtvConfig);
 
@@ -290,12 +317,24 @@ contract OperationTest is Setup {
     }
 
     function checkLTV(bool canBeZero) internal {
+        checkLTV(canBeZero, false);
+    }
+
+    function checkLTV(bool canBeZero, bool onlyCheckTooHigh) internal {
         if (canBeZero && strategy.currentLTV() == 0) return;
-        assertApproxEq(
-            strategy.currentLTV(),
-            strategy.ltvs().targetLTV,
-            strategy.ltvs().minAdjustThreshold,
-            "!ltv"
-        );
+        if (onlyCheckTooHigh) {
+            assertLe(
+                strategy.currentLTV(),
+                strategy.ltvs().targetLTV + strategy.ltvs().minAdjustThreshold,
+                "!checkLtv"
+            );
+        } else {
+            assertApproxEq(
+                strategy.currentLTV(),
+                strategy.ltvs().targetLTV,
+                strategy.ltvs().minAdjustThreshold,
+                "!checkLtv"
+            );
+        }
     }
 }

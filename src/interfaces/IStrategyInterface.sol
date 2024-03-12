@@ -16,8 +16,6 @@ interface IStrategyInterface is IStrategy {
 
     function depositLimit() external view returns (uint256);
 
-    function expectedFlashloanFee() external view returns (uint256);
-
     function slippageAllowedBps() external view returns (uint256);
 
     struct LTVConfig {
@@ -48,17 +46,11 @@ interface IStrategyInterface is IStrategy {
         view
         returns (uint256 _eta);
 
-    function uniFees(address, address) external view returns (uint24);
-
-    function router() external view returns (address);
-
     function setLtvConfig(LTVConfig memory _ltvs) external;
 
-    function setUniFee(address _token, uint24 _fee) external;
+    function setUniswapFee(uint24 _fee) external;
 
     function setDepositLimit(uint256 _depositLimit) external;
-
-    function setExpectedFlashloanFee(uint16 _maxFlashloanFeeBps) external;
 
     function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
 

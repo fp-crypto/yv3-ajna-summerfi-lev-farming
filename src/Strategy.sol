@@ -7,36 +7,21 @@ import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
+import {IUniswapV3Factory} from "@uniswap-v3-core/interfaces/IUniswapV3Factory.sol";
 
-import {IStrategyInterface} from "./interfaces/IStrategyInterface.sol";
 import {IWETH} from "./interfaces/IWeth.sol";
+import {IAccount} from "./interfaces/summerfi/IAccount.sol";
+import {IAccountFactory} from "./interfaces/summerfi/IAccountFactory.sol";
 import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
-import {IBalancer} from "./interfaces/balancer/IBalancer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
 import "forge-std/console.sol"; // TODO: delete
 
-interface IAccountFactory {
-    function createAccount() external returns (address);
-
-    function createAccount(address _user) external returns (address);
-}
-
-interface IAccount {
-    function send(address _target, bytes calldata _data) external payable;
-
-    function execute(address _target, bytes memory _data)
-        external
-        payable
-        returns (bytes32);
-}
-
 // TODO:
 //  1. Implement and test manual deleverage
 //  2. Implement swap ajna -> asset
-//  3. Handle slippage in swaps
-//  4. Fully flesh out tend trigger
+//  3. Fully flesh out tend trigger
 
 contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     using SafeERC20 for ERC20;
@@ -49,8 +34,8 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
     IAjnaRedeemer private constant SUMMERFI_REWARDS =
         IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
-    IBalancer private constant BALANCER_VAULT =
-        IBalancer(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
+    IUniswapV3Factory private constant UNISWAP_FACTORY =
+        IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
 
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address public constant AJNA_TOKEN =
@@ -68,7 +53,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     bool private positionOpen;
 
     uint16 public maxFlashloanFeeBps;
-    uint16 public slippageAllowedBps = 50;
+    uint16 public slippageAllowedBps = 25;
     uint256 public depositLimit;
     uint256 public maxTendBasefee = 30e9;
 
@@ -97,7 +82,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         address _asset,
         string memory _name,
         address _ajnaPool,
-        address _uniswapPool,
+        uint24 _uniswapFee,
         bytes4 _unwrappedToWrappedSelector,
         address _chainlinkOracle,
         bool _oracleWrapped
@@ -116,37 +101,22 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
 
         LTVConfig memory _ltvs;
-        _ltvs.targetLTV = 0.85e18; // TODO: delete this
         _ltvs.minAdjustThreshold = DEFAULT_MIN_ADJUST_THRESHOLD;
         _ltvs.warningThreshold = DEFAULT_WARNING_THRESHOLD;
         _ltvs.emergencyThreshold = DEFAULT_EMERGENCY_THRESHOLD;
         ltvs = _ltvs;
 
-        depositLimit = 2**256 - 1; // TODO: delete this
-
-        _setUniswapPool(IUniswapV3Pool(_uniswapPool));
+        _setUniswapFee(_uniswapFee);
     }
 
     function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
-        require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less then emergency threshold
+        require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less than emergency threshold
+        require(_ltvs.minAdjustThreshold < _ltvs.warningThreshold); // dev: minAdjust must be less than warning threshold
         ltvs = _ltvs;
     }
 
-    function setUniswapPool(address _uniswapPool) external onlyManagement {
-        _setUniswapPool(IUniswapV3Pool(_uniswapPool));
-    }
-
-    function _setUniswapPool(IUniswapV3Pool _uniswapPool) internal {
-        require(
-            _uniswapPool.token0() == address(asset) ||
-                _uniswapPool.token1() == address(asset)
-        ); // dev: pool must contain asset
-        require(
-            _uniswapPool.token0() == address(WETH) ||
-                _uniswapPool.token1() == address(WETH)
-        ); // dev: pool must contain weth
-        uniswapPool = _uniswapPool;
-        console.log("up: %s", address(uniswapPool));
+    function setUniswapFee(uint24 _fee) external onlyManagement {
+        _setUniswapFee(_fee);
     }
 
     function setDepositLimit(uint256 _depositLimit) external onlyManagement {
@@ -271,8 +241,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // TODO: figure out ratio stuff
-        //uint256 _ratio = (_amount * ONE_WAD) / TokenizedStrategy.totalAssets(); // TODO: does totalIdle need to be added to the amount here (ask schlag)
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
         uint256 _positionValue = _calculateNetPosition(
@@ -284,6 +252,10 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         if (_amount != _totalAssets && _positionValue < _totalAssets) {
             _amount = (_amount * _positionValue) / _totalAssets;
         }
+
+        // TODO: delete?
+        //_debt = (_debt * (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
+        //_collateral = (_collateral * (MAX_BPS - slippageAllowedBps)) / MAX_BPS;
         _leverDown(_debt, _collateral, _amount, ltvs, _price);
 
         (_debt, _collateral, , ) = _positionInfo();
@@ -457,23 +429,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     }
 
     /**
-     * @notice Claims summerfi ajna rewards
-     *
-     * Unguarded because there is no risk claiming
-     *
-     * @param _weeks An array of week numbers for which to claim rewards.
-     * @param _amounts An array of reward amounts to claim.
-     * @param _proofs An array of Merkle proofs, one for each corresponding week and amount given.
-     */
-    function redeemSummerAjnaRewards(
-        uint256[] calldata _weeks,
-        uint256[] calldata _amounts,
-        bytes32[][] calldata _proofs
-    ) external {
-        SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
-    }
-
-    /**
      * @dev Optional function for a strategist to override that will
      * allow management to manually withdraw deployed funds from the
      * yield source if a strategy is shutdown.
@@ -496,9 +451,32 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      *
      */
     function _emergencyWithdraw(uint256 _amount) internal override {
-        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        _leverDown(_debt, _collateral, _amount, ltvs, _getAssetPerWeth());
+        // TODO: implement better?
+        _freeFunds(_amount);
+        //(uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        //_swapAndLeverDown(_debt, _amount, true, _getAssetPerWeth());
     }
+
+    /**
+     * @notice Claims summerfi ajna rewards
+     *
+     * Unguarded because there is no risk claiming
+     *
+     * @param _weeks An array of week numbers for which to claim rewards.
+     * @param _amounts An array of reward amounts to claim.
+     * @param _proofs An array of Merkle proofs, one for each corresponding week and amount given.
+     */
+    function redeemSummerAjnaRewards(
+        uint256[] calldata _weeks,
+        uint256[] calldata _amounts,
+        bytes32[][] calldata _proofs
+    ) external {
+        SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
+    }
+
+    /**************************************************
+     *      INTERNAL POSTION MANAGMENT FUNCTIONS      *
+     **************************************************/
 
     /**
      * @notice Adjusts the leveraged position
@@ -507,7 +485,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         (
             uint256 _debt,
             uint256 _collateral,
-            ,
+           ,
             uint256 _thresholdPrice
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
@@ -540,6 +518,12 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         LeverUp,
         LeverDown,
         ClosePosition
+    }
+
+    struct LeverData {
+        LeverAction action;
+        uint256 assetToFree;
+        uint256 assetPerWeth;
     }
 
     /**
@@ -575,11 +559,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             return;
         }
 
-        bytes memory _flashLoanData = abi.encode(
-            LeverAction.LeverUp,
-            uint256(0)
-        );
-        _swapExactWethIn(_toBorrow, _flashLoanData);
+        _swapAndLeverUp(_toBorrow, _assetPerWeth);
     }
 
     /**
@@ -588,7 +568,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     function _leverDown(
         uint256 _debt,
         uint256 _collateral,
-        uint256 _collateralToFree,
+        uint256 _assetToFree,
         LTVConfig memory _ltvs,
         uint256 _assetPerWeth
     ) internal {
@@ -599,9 +579,9 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         );
 
         uint256 _targetBorrow;
-        if (_supply > _collateralToFree) {
+        if (_supply > _assetToFree) {
             _targetBorrow = _getBorrowFromSupply(
-                _supply - _collateralToFree,
+                _supply - _assetToFree,
                 _ltvs.targetLTV,
                 _assetPerWeth
             );
@@ -612,58 +592,46 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         }
 
         uint256 _repaymentAmount;
-        unchecked {
-            if (_debt <= _targetBorrow) {
-                _repaymentAmount = 0;
-            } else {
+        if (_debt > _targetBorrow) {
+            unchecked {
                 _repaymentAmount = _debt - _targetBorrow;
             }
+        } else {
+            _repaymentAmount = 0;
         }
 
         if (_repaymentAmount < DUST_THRESHOLD) {
-            if (_collateralToFree > DUST_THRESHOLD) {
-                _repayWithdraw(0, _collateralToFree, false);
+            if (_assetToFree > DUST_THRESHOLD) {
+                _repayWithdraw(0, _assetToFree, false);
             }
             return;
         }
 
-        bytes memory _swapData = abi.encode(
-            _repaymentAmount == _debt
-                ? LeverAction.ClosePosition
-                : LeverAction.LeverDown,
-            _collateralToFree
-        );
-
-        uint256 _idleBefore = asset.balanceOf(address(this));
-
-        uint256 _collateralUsed = _swapExactWethOut(
+        _swapAndLeverDown(
             _repaymentAmount,
-            _swapData
+            _assetToFree,
+            _repaymentAmount == _debt && _assetToFree == 0, // toClose
+            _assetPerWeth
         );
-
-        require(
-            _collateralUsed <=
-                (((_repaymentAmount * (MAX_BPS + slippageAllowedBps)) /
-                    MAX_BPS) * _assetPerWeth) /
-                    ONE_WAD,
-            "!slippage"
-        ); // dev: too much slippage
     }
 
     /**************************************************
      *               UNISWAP FUNCTIONS                *
      **************************************************/
 
-    function _swapExactWethIn(uint256 _amountIn, bytes memory _data)
+    function _swapAndLeverUp(uint256 _borrowAmount, uint256 _assetPerWeth)
         private
-        returns (uint256 _amountOut)
     {
         bool zeroForOne = WETH < address(asset);
+
+        bytes memory _data = abi.encode(
+            LeverData(LeverAction.LeverUp, uint256(0), _assetPerWeth)
+        );
 
         (int256 amount0, int256 amount1) = uniswapPool.swap(
             address(this),
             zeroForOne,
-            int256(_amountIn),
+            int256(_borrowAmount),
             (
                 zeroForOne
                     ? UNISWAP_MIN_SQRT_RATIO + 1
@@ -672,19 +640,36 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _data
         );
 
-        return uint256(-(zeroForOne ? amount1 : amount0));
+        uint256 _assetOut = uint256(-(zeroForOne ? amount1 : amount0));
+        require(
+            _assetOut >=
+                (((_borrowAmount * (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
+                    _assetPerWeth) /
+                    ONE_WAD,
+            "!slippage"
+        );
     }
 
-    function _swapExactWethOut(uint256 _amountOut, bytes memory _data)
-        private
-        returns (uint256 _amountIn)
-    {
+    function _swapAndLeverDown(
+        uint256 _repaymentAmount,
+        uint256 _assetToLoose,
+        bool _close,
+        uint256 _assetPerWeth
+    ) private {
         bool zeroForOne = address(asset) < WETH;
+
+        bytes memory _data = abi.encode(
+            LeverData(
+                _close ? LeverAction.ClosePosition : LeverAction.LeverDown,
+                _assetToLoose,
+                _assetPerWeth
+            )
+        );
 
         (int256 amount0Delta, int256 amount1Delta) = uniswapPool.swap(
             address(this),
             zeroForOne,
-            -int256(_amountOut),
+            -int256(_repaymentAmount),
             (
                 zeroForOne
                     ? UNISWAP_MIN_SQRT_RATIO + 1
@@ -693,13 +678,21 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _data
         );
 
-        uint256 amountOutReceived;
-        (_amountIn, amountOutReceived) = zeroForOne
+        (uint256 _assetIn, uint256 _wethOut) = zeroForOne
             ? (uint256(amount0Delta), uint256(-amount1Delta))
             : (uint256(amount1Delta), uint256(-amount0Delta));
-        // it's technically possible to not receive the full output amount,
-        // so if no price limit has been specified, require this possibility away
-        require(amountOutReceived == _amountOut);
+
+        // it's technically possible to not receive the full output amount
+        // require this possibility away
+        require(_wethOut == _repaymentAmount);
+
+        require(
+            _assetIn <=
+                (((_repaymentAmount * (MAX_BPS + slippageAllowedBps)) /
+                    MAX_BPS) * _assetPerWeth) /
+                    ONE_WAD,
+            "!slippage"
+        ); // dev: too much slippage
     }
 
     /// @inheritdoc IUniswapV3SwapCallback
@@ -710,52 +703,78 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     ) external {
         require(msg.sender == address(uniswapPool)); // dev: callback only called by pool
         require(_amount0Delta > 0 || _amount1Delta > 0); // dev: swaps entirely within 0-liquidity regions are not supported
-        bool wethGreaterThanAsset = WETH > address(asset);
+        bool wethIsToken0 = WETH < address(asset);
 
         (
-            bool isExactInput,
-            uint256 amountToPay,
-            uint256 amountReceived
+            bool _isExactInput,
+            uint256 _amountToPay,
+            uint256 _amountReceived
         ) = _amount0Delta > 0
                 ? (
-                    !wethGreaterThanAsset,
+                    wethIsToken0,
                     uint256(_amount0Delta),
                     uint256(-_amount1Delta)
                 )
                 : (
-                    wethGreaterThanAsset,
+                    !wethIsToken0,
                     uint256(_amount1Delta),
                     uint256(-_amount0Delta)
                 );
 
-        if (isExactInput) {
+        LeverData memory _leverData = abi.decode(_data, (LeverData));
+
+        if (_isExactInput) {
+            require(_leverData.action == LeverAction.LeverUp); // dev: WTF
+
+            uint256 _leastAssetReceived = (((_amountToPay *
+                (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
+                _leverData.assetPerWeth) / ONE_WAD;
+            require(_amountReceived >= _leastAssetReceived, "!slippage"); // dev: too much slippage
+
             uint256 _collateralToAdd = asset.balanceOf(address(this));
             if (!positionOpen) {
                 positionOpen = true;
-                _openPosition(amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
+                _openPosition(_amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
             } else {
-                _depositAndDraw(amountToPay, _collateralToAdd, ONE_WAD, false);
+                _depositAndDraw(_amountToPay, _collateralToAdd, ONE_WAD, false);
             }
 
-            ERC20(WETH).transfer(msg.sender, amountToPay);
+            ERC20(WETH).transfer(msg.sender, _amountToPay);
         } else {
-            (LeverAction _action, uint256 _collateralToFree) = abi.decode(
-                _data,
-                (LeverAction, uint256)
-            );
-            require(_action != LeverAction.LeverUp); // dev: WTF
+            require(_leverData.action != LeverAction.LeverUp); // dev: WTF
+            uint256 _expectedAssetToPay = (_amountReceived *
+                _leverData.assetPerWeth) / ONE_WAD;
+            uint256 _mostAssetToPay = (_expectedAssetToPay *
+                (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
 
-            if (_action == LeverAction.LeverDown) {
+            require(_amountToPay <= _mostAssetToPay, "!slippage"); // dev: too much slippage
+
+            if (_amountToPay > _expectedAssetToPay) {
+                console.log("Slippage to withdraw amount");
+                // pass slippage onto the asset to free amount
+                uint256 _slippage = _amountToPay - _expectedAssetToPay;
+                if (_leverData.assetToFree > _slippage) {
+                    _leverData.assetToFree -= _slippage;
+                } else {
+                    _leverData.assetToFree = 0;
+                }
+            }
+
+            if (_amountToPay < _expectedAssetToPay) {
+                console.log("You got a discount");
+            }
+
+            if (_leverData.action == LeverAction.LeverDown) {
                 _repayWithdraw(
-                    amountReceived,
-                    amountToPay + _collateralToFree,
+                    _amountReceived,
+                    _amountToPay + _leverData.assetToFree,
                     false
                 );
-            } else if (_action == LeverAction.ClosePosition) {
+            } else if (_leverData.action == LeverAction.ClosePosition) {
                 positionOpen = false;
-                _repayAndClose(amountReceived);
+                _repayAndClose(_amountReceived);
             }
-            asset.transfer(msg.sender, amountToPay);
+            asset.transfer(msg.sender, _amountToPay);
         }
     }
 
@@ -798,6 +817,39 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             return _answer;
         }
         return _unwrappedToWrappedAsset(_answer);
+    }
+
+    /**************************************************
+     *               INTERNAL SETTERS                 *
+     **************************************************/
+
+    function _setUniswapFee(uint24 _fee) internal {
+        IUniswapV3Pool _uniswapPool = IUniswapV3Pool(
+            UNISWAP_FACTORY.getPool(address(asset), WETH, _fee)
+        );
+        // IUniswapV3Pool _uniswapPool = IUniswapV3Pool(
+        //     PoolAddress.computeAddress(
+        //         UNISWAP_FACTORY,
+        //         PoolAddress.getPoolKey(address(asset), WETH, _fee)
+        //     )
+        // );
+        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).token0);
+        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).token1);
+        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).fee);
+        console.log("up: %s", address(_uniswapPool));
+        // console.log("asset: %s", address(asset));
+        // console.log("weth: %s", WETH);
+        // console.log("fee: %s", _fee);
+        // console.log("factory: %s", UNISWAP_FACTORY);
+        require(
+            _uniswapPool.token0() == address(asset) ||
+                _uniswapPool.token1() == address(asset)
+        ); // dev: pool must contain asset
+        require(
+            _uniswapPool.token0() == address(WETH) ||
+                _uniswapPool.token1() == address(WETH)
+        ); // dev: pool must contain weth
+        uniswapPool = _uniswapPool;
     }
 
     /**************************************************

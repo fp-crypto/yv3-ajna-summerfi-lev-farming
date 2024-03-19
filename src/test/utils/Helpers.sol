@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.18;
+pragma solidity ^0.8.18;
 
 import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 import {IChainlinkAggregator} from "../../interfaces/chainlink/IChainlinkAggregator.sol";

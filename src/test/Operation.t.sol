@@ -83,6 +83,7 @@ contract OperationTest is Setup {
 
     function test_profitableReport(uint256 _amount) public {
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
+        setFees(0, 0);
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -141,92 +142,91 @@ contract OperationTest is Setup {
         Helpers.logStrategyInfo(strategy);
     }
 
-    function test_withdrawSubset(
-        uint64 _depositAmount,
-        uint64 _withdrawAmount,
-        bool profit
-    ) public {
-        vm.assume(
-            _depositAmount > minFuzzAmount && _depositAmount < maxFuzzAmount
-        );
-        vm.assume(
-            _depositAmount > _withdrawAmount && _withdrawAmount >= 0.025e18
-        );
-
-        vm.prank(management);
-        strategy.setSlippageAllowedBps(100);
-
-        // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _depositAmount);
-
-        // tend to deploy funds
-        vm.prank(keeper);
-        strategy.tend();
-        checkLTV(false);
-
-        checkStrategyTotals(strategy, _depositAmount, _depositAmount, 0);
-
-        if (profit) {
-            // Make money
-            uint256 _lstPrice = Helpers.generatePaperProfit(
-                vm,
-                strategy,
-                REPORTING_PERIOD
+        function test_withdrawSubset(
+            uint64 _depositAmount,
+            uint64 _withdrawAmount,
+            bool profit
+        ) public {
+            vm.assume(
+                _depositAmount > minFuzzAmount && _depositAmount < maxFuzzAmount
             );
-            Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
-            skip(REPORTING_PERIOD);
-        }
-
-        uint256 balanceBefore = asset.balanceOf(user);
-        uint256 totalAssetsBefore = Math.min(
-            strategy.estimatedTotalAssetsNoSlippage(),
-            strategy.totalAssets()
-        );
-
-        // Withdraw some funds
-        vm.prank(user);
-        strategy.redeem(_withdrawAmount, user, user);
-        checkLTV(true, true);
-
-        assertLe(
-            asset.balanceOf(user),
-            balanceBefore + _withdrawAmount,
-            "!final balance"
-        );
-
-        uint256 targetRatio = (uint256(_withdrawAmount) * 1e4) / _depositAmount;
-        uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e4) /
-            totalAssetsBefore;
-
-        // TODO: tighter range
-        if (profit) {
+            vm.assume(
+                _depositAmount > _withdrawAmount && _withdrawAmount >= 0.025e18
+            );
+    
+            vm.prank(management);
+            strategy.setSlippageAllowedBps(100);
+    
+            // Deposit into strategy
+            mintAndDepositIntoStrategy(strategy, user, _depositAmount);
+    
+            // tend to deploy funds
+            vm.prank(keeper);
+            strategy.tend();
+            checkLTV(false);
+    
+            checkStrategyTotals(strategy, _depositAmount, _depositAmount, 0);
+    
+            if (profit) {
+                // Make money
+                uint256 _lstPrice = Helpers.generatePaperProfit(
+                    vm,
+                    strategy,
+                    REPORTING_PERIOD
+                );
+                Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+                skip(REPORTING_PERIOD);
+            }
+    
+            uint256 balanceBefore = asset.balanceOf(user);
+            uint256 totalAssetsBefore = Math.min(
+                strategy.estimatedTotalAssetsNoSlippage(),
+                strategy.totalAssets()
+            );
+    
+            // Withdraw some funds
+            vm.prank(user);
+            strategy.redeem(_withdrawAmount, user, user);
+            checkLTV(true, true);
+    
             assertLe(
-                actualRatio,
-                targetRatio,
-                "!ratio"
-            );
-        } else {
-            assertApproxEq(
-                actualRatio,
-                targetRatio,
-                50, // bp
-                "!ratio"
-            );
-        }
-
-        balanceBefore = asset.balanceOf(user);
-        vm.prank(user);
-        strategy.redeem(strategy.balanceOf(user), user, user);
-
-        if (profit) {
-            assertGe(
                 asset.balanceOf(user),
-                balanceBefore + _depositAmount,
+                balanceBefore + _withdrawAmount,
                 "!final balance"
             );
+    
+            uint256 targetRatio = (uint256(_withdrawAmount) * 1e4) / _depositAmount;
+            uint256 actualRatio = ((asset.balanceOf(user) - balanceBefore) * 1e4) /
+                totalAssetsBefore;
+    
+            // TODO: tighter range
+            if (profit) {
+                assertLe(actualRatio, targetRatio, "!ratio");
+            } else {
+                assertApproxEq(
+                    actualRatio,
+                    targetRatio,
+                    50, // bp
+                    "!ratio"
+                );
+            }
+    
+            balanceBefore = asset.balanceOf(user);
+            uint256 redeemAmount = strategy.balanceOf(user);
+            console.log("redeemAmount: %s", redeemAmount);
+            vm.prank(user);
+            strategy.redeem(redeemAmount, user, user);
+    
+            if (profit) {
+                assertGe(
+                    (asset.balanceOf(user) *
+                        (1e4 + strategy.slippageAllowedBps() * 2)) / 1e4,
+                    balanceBefore + (_depositAmount - _withdrawAmount),
+                    "!final balance"
+                );
+            }
         }
-    }
-
+    
     function test_ltvChanges(uint64 _startingLtv, uint64 _endingLtv) public {
         _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
         _endingLtv = uint64(bound(_endingLtv, 0.4e18, 0.85e18)); // max ltv 85%

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.18;
+pragma solidity ^0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -53,7 +53,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     bool private positionOpen;
 
     uint16 public maxFlashloanFeeBps;
-    uint16 public slippageAllowedBps = 25;
+    uint16 public slippageAllowedBps = 50;
     uint256 public depositLimit;
     uint256 public maxTendBasefee = 30e9;
 
@@ -150,6 +150,17 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      *          PUBLIC VIEW FUNCTIONS          *
      *******************************************/
 
+    function totalDebt() public view returns (uint256) {
+        uint256 _totalAssets = TokenizedStrategy.totalAssets();
+        uint256 _totalIdle = totalIdle();
+        if (_totalIdle > _totalAssets) return 0;
+        return _totalAssets - _totalIdle;
+    }
+
+    function totalIdle() public view returns (uint256) {
+        return asset.balanceOf(address(this));
+    }
+
     function positionInfo()
         external
         view
@@ -241,6 +252,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
+        console.log("free funds");
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
         uint256 _positionValue = _calculateNetPosition(
@@ -249,7 +261,9 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _price
         );
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
+        console.log("free amount: %s", _amount);
         if (_amount != _totalAssets && _positionValue < _totalAssets) {
+            console.log("scaling withdraw");
             _amount = (_amount * _positionValue) / _totalAssets;
         }
 
@@ -485,7 +499,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         (
             uint256 _debt,
             uint256 _collateral,
-           ,
+            ,
             uint256 _thresholdPrice
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
@@ -588,6 +602,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
             if (_targetBorrow < _minLoanSize()) {
                 _targetBorrow = 0;
+                console.log("min loan");
             }
         }
 
@@ -600,17 +615,31 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _repaymentAmount = 0;
         }
 
-        if (_repaymentAmount < DUST_THRESHOLD) {
+        if (_repaymentAmount == 0) {
+            //< DUST_THRESHOLD) {
             if (_assetToFree > DUST_THRESHOLD) {
+                if (_assetToFree > _collateral) {
+                    _assetToFree = _collateral;
+                }
                 _repayWithdraw(0, _assetToFree, false);
             }
             return;
         }
 
+        bool _closePosition = _repaymentAmount == _debt &&
+            (_assetToFree == 0 ||
+                _assetToFree >= totalDebt());
+
+        console.log("close: %s", _closePosition);
+        console.log("ra: %s", _repaymentAmount);
+        console.log("d: %s", _debt);
+        console.log("_assetToFree: %s", _assetToFree);
+        console.log("ta: %s", totalDebt());
+
         _swapAndLeverDown(
             _repaymentAmount,
             _assetToFree,
-            _repaymentAmount == _debt && _assetToFree == 0, // toClose
+            _closePosition,
             _assetPerWeth
         );
     }
@@ -628,7 +657,8 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             LeverData(LeverAction.LeverUp, uint256(0), _assetPerWeth)
         );
 
-        (int256 amount0, int256 amount1) = uniswapPool.swap(
+        /* (int256 amount0, int256 amount1) = */
+        uniswapPool.swap(
             address(this),
             zeroForOne,
             int256(_borrowAmount),
@@ -638,15 +668,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
                     : UNISWAP_MAX_SQRT_RATIO - 1
             ),
             _data
-        );
-
-        uint256 _assetOut = uint256(-(zeroForOne ? amount1 : amount0));
-        require(
-            _assetOut >=
-                (((_borrowAmount * (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
-                    _assetPerWeth) /
-                    ONE_WAD,
-            "!slippage"
         );
     }
 
@@ -684,15 +705,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
         // it's technically possible to not receive the full output amount
         // require this possibility away
-        require(_wethOut == _repaymentAmount);
-
-        require(
-            _assetIn <=
-                (((_repaymentAmount * (MAX_BPS + slippageAllowedBps)) /
-                    MAX_BPS) * _assetPerWeth) /
-                    ONE_WAD,
-            "!slippage"
-        ); // dev: too much slippage
+        require(_wethOut == _repaymentAmount); // dev: wethOut != _repaymentAmount
     }
 
     /// @inheritdoc IUniswapV3SwapCallback
@@ -723,8 +736,8 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
         LeverData memory _leverData = abi.decode(_data, (LeverData));
 
-        if (_isExactInput) {
-            require(_leverData.action == LeverAction.LeverUp); // dev: WTF
+        if (_leverData.action == LeverAction.LeverUp) {
+            require(_isExactInput); // dev: WTF
 
             uint256 _leastAssetReceived = (((_amountToPay *
                 (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
@@ -741,7 +754,8 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
             ERC20(WETH).transfer(msg.sender, _amountToPay);
         } else {
-            require(_leverData.action != LeverAction.LeverUp); // dev: WTF
+            // LeverDown || ClosePosition
+            require(!_isExactInput); // dev: WTF
             uint256 _expectedAssetToPay = (_amountReceived *
                 _leverData.assetPerWeth) / ONE_WAD;
             uint256 _mostAssetToPay = (_expectedAssetToPay *
@@ -911,7 +925,9 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         uint256 _collateralAmount,
         bool _stamp
     ) internal {
-        IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        if (_debtAmount != 0) {
+            IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        }
         summerfiAccount.execute{value: _debtAmount}(
             address(SUMMERFI_AJNA_PROXY_ACTIONS),
             abi.encodeCall(
@@ -925,7 +941,9 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      *  @notice Repay debt and close position via account proxy
      */
     function _repayAndClose(uint256 _debtAmount) internal {
-        IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        if (_debtAmount != 0) {
+            IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
+        }
         summerfiAccount.execute{value: _debtAmount}(
             address(SUMMERFI_AJNA_PROXY_ACTIONS),
             abi.encodeCall(

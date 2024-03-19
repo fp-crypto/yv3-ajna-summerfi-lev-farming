@@ -1,4 +1,4 @@
-pragma solidity 0.8.18;
+pragma solidity ^0.8.18;
 
 interface IAccount {
     function send(address _target, bytes calldata _data) external payable;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.18;
+pragma solidity ^0.8.18;
 
 import {IStrategy} from "@tokenized-strategy/interfaces/IStrategy.sol";
 
@@ -24,6 +24,12 @@ interface IStrategyInterface is IStrategy {
         uint64 warningThreshold;
         uint64 emergencyThreshold;
     }
+    
+    function totalAssets() external view returns (uint256);
+
+    function totalIdle() external view returns (uint256);
+
+    function totalDebt() external view returns (uint256);
 
     function ltvs() external view returns (LTVConfig memory);
 

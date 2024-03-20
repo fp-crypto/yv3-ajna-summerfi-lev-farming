@@ -9,9 +9,9 @@ interface IStrategyInterface is IStrategy {
     function summerfiAccount() external view returns (address);
 
     function ajnaPool() external view returns (address);
-    
+
     function uniswapPool() external view returns (address);
-    
+
     function positionOpen() external view returns (bool);
 
     function chainlinkOracle() external view returns (address);
@@ -28,7 +28,7 @@ interface IStrategyInterface is IStrategy {
         uint64 warningThreshold;
         uint64 emergencyThreshold;
     }
-    
+
     function ltvs() external view returns (LTVConfig memory);
 
     function positionInfo()
@@ -59,4 +59,10 @@ interface IStrategyInterface is IStrategy {
     function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
 
     function setMaxTendBasefee(uint256 _maxTendBasefee) external;
+
+    function manualLeverDown(
+        uint256 _toLoose,
+        uint64 _targetLTV,
+        bool _force
+    ) external;
 }

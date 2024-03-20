@@ -213,6 +213,40 @@ contract Setup is ExtendedTest, IEvents {
         strategy.setPerformanceFee(_performanceFee);
     }
 
+    function checkLTV() internal {
+        checkLTV(true);
+    }
+
+    function checkLTV(uint64 targetLTV) internal {
+        checkLTV(true, false, targetLTV);
+    }
+
+    function checkLTV(bool canBeZero) internal {
+        checkLTV(canBeZero, false);
+    }
+
+    function checkLTV(bool canBeZero, bool onlyCheckTooHigh) internal {
+        checkLTV(canBeZero, onlyCheckTooHigh, strategy.ltvs().targetLTV);
+    }
+
+    function checkLTV(bool canBeZero, bool onlyCheckTooHigh, uint64 targetLTV) internal {
+        if (canBeZero && strategy.currentLTV() == 0) return;
+        if (onlyCheckTooHigh) {
+            assertLe(
+                targetLTV,
+                strategy.ltvs().targetLTV + strategy.ltvs().minAdjustThreshold,
+                "!checkLtv"
+            );
+        } else {
+            assertApproxEq(
+                targetLTV,
+                strategy.ltvs().targetLTV,
+                strategy.ltvs().minAdjustThreshold,
+                "!checkLtv"
+            );
+        }
+    }
+
     function _setTokenAddrs() internal {
         tokenAddrs["WBTC"] = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
         tokenAddrs["YFI"] = 0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e;

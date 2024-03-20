@@ -19,9 +19,8 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 import "forge-std/console.sol"; // TODO: delete
 
 // TODO:
-//  1. Implement and test manual deleverage
-//  2. Implement swap ajna -> asset
-//  3. Fully flesh out tend trigger
+//  1. Implement swap ajna -> asset
+//  2. Fully flesh out tend trigger
 
 contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     using SafeERC20 for ERC20;
@@ -51,7 +50,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
 
-    uint16 public maxFlashloanFeeBps;
     uint16 public slippageAllowedBps = 50;
     uint256 public depositLimit;
     uint256 public maxTendBasefee = 30e9;
@@ -106,43 +104,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         ltvs = _ltvs;
 
         _setUniswapFee(_uniswapFee);
-    }
-
-    function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
-        require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less than emergency threshold
-        require(_ltvs.minAdjustThreshold < _ltvs.warningThreshold); // dev: minAdjust must be less than warning threshold
-        ltvs = _ltvs;
-    }
-
-    function setUniswapFee(uint24 _fee) external onlyManagement {
-        _setUniswapFee(_fee);
-    }
-
-    function setDepositLimit(uint256 _depositLimit) external onlyManagement {
-        depositLimit = _depositLimit;
-    }
-
-    function setExpectedFlashloanFee(uint16 _maxFlashloanFeeBps)
-        external
-        onlyManagement
-    {
-        require(_maxFlashloanFeeBps <= MAX_BPS); // dev: cannot be more than 100%
-        maxFlashloanFeeBps = _maxFlashloanFeeBps;
-    }
-
-    function setSlippageAllowedBps(uint16 _slippageAllowedBps)
-        external
-        onlyManagement
-    {
-        require(_slippageAllowedBps <= MAX_BPS); // dev: cannot be more than 100%
-        slippageAllowedBps = _slippageAllowedBps;
-    }
-
-    function setMaxTendBasefee(uint256 _maxTendBasefee)
-        external
-        onlyManagement
-    {
-        maxTendBasefee = _maxTendBasefee;
     }
 
     /*******************************************
@@ -209,6 +170,63 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _idle;
     }
 
+    /*******************************************
+     *          MANAGEMENT FUNCTIONS           *
+     *******************************************/
+
+    /**
+     * @notice Sets the ltv configuration. Can only be called by management
+     * @param _ltvs The LTV configuration
+     */
+    function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
+        require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less than emergency threshold
+        require(_ltvs.minAdjustThreshold < _ltvs.warningThreshold); // dev: minAdjust must be less than warning threshold
+        ltvs = _ltvs;
+    }
+
+    /**
+     * @notice Sets the uniswap fee tier. Can only be called by management
+     * @param _fee The uniswap fee tier to use for Asset<->Weth swaps
+     */
+    function setUniswapFee(uint24 _fee) external onlyManagement {
+        _setUniswapFee(_fee);
+    }
+
+    /**
+     * @notice Sets the deposit limit. Can only be called by management
+     * @param _depositLimit The deposit limit
+     */
+    function setDepositLimit(uint256 _depositLimit) external onlyManagement {
+        depositLimit = _depositLimit;
+    }
+
+    /**
+     * @notice Sets the slippage allowed on swaps. Can only be called by management
+     * @param _slippageAllowedBps The slippage allowed in basis points
+     */
+    function setSlippageAllowedBps(uint16 _slippageAllowedBps)
+        external
+        onlyManagement
+    {
+        require(_slippageAllowedBps <= MAX_BPS); // dev: cannot be more than 100%
+        slippageAllowedBps = _slippageAllowedBps;
+    }
+
+    /**
+     * @notice Sets the max base fee for tends. Can only be called by management
+     * @param _maxTendBasefee The maximum base fee allowed in non-emergency tends
+     */
+    function setMaxTendBasefee(uint256 _maxTendBasefee)
+        external
+        onlyManagement
+    {
+        maxTendBasefee = _maxTendBasefee;
+    }
+
+    /***********************************************
+     *      BASE STRATEGY OVERRIDE FUNCTIONS       *
+     ***********************************************/
+
     /**
      * @dev Should deploy up to '_amount' of 'asset' in the yield source.
      *
@@ -250,7 +268,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        console.log("free funds");
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
         uint256 _positionValue = _calculateNetPosition(
@@ -259,19 +276,15 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             _price
         );
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
-        console.log("free amount: %s", _amount);
         if (_amount != _totalAssets && _positionValue < _totalAssets) {
-            console.log("scaling withdraw");
             _amount = (_amount * _positionValue) / _totalAssets;
         }
 
-        // TODO: delete?
-        //_debt = (_debt * (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
-        //_collateral = (_collateral * (MAX_BPS - slippageAllowedBps)) / MAX_BPS;
-        _leverDown(_debt, _collateral, _amount, ltvs, _price);
+        LTVConfig memory _ltvs = ltvs;
+
+        _leverDown(_debt, _collateral, _amount, _ltvs, _price);
 
         (_debt, _collateral, , ) = _positionInfo();
-        LTVConfig memory _ltvs = ltvs;
         require(
             _calculateLTV(_debt, _collateral, _price) <
                 _ltvs.targetLTV + _ltvs.minAdjustThreshold,
@@ -469,6 +482,45 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         //_swapAndLeverDown(_debt, _amount, true, _getAssetPerWeth());
     }
 
+    /**************************************************
+     *      EXTERNAL POSTION MANAGMENT FUNCTIONS      *
+     **************************************************/
+
+    /**
+     * @notice Allows management to manually lever down
+     *
+     * @param _toLoose the amount of assets to attempt to loose
+     * @param _targetLTV the LTV ratio to target
+     * @param _force Ignore safety checks
+     */
+    function manualLeverDown(
+        uint256 _toLoose,
+        uint64 _targetLTV,
+        bool _force
+    ) external onlyManagement {
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        uint256 _price = _getAssetPerWeth();
+        uint256 _positionValue = _calculateNetPosition(
+            _debt,
+            _collateral,
+            _price
+        );
+
+        LTVConfig memory _ltvs = ltvs;
+        require(_force || _targetLTV <= ltvs.targetLTV); // dev: _targetLTV too high
+        ltvs.targetLTV = _targetLTV;
+
+        _leverDown(_debt, _collateral, _toLoose, _ltvs, _price);
+
+        (_debt, _collateral, , ) = _positionInfo();
+        require(
+            _force ||
+                _calculateLTV(_debt, _collateral, _price) <
+                _ltvs.targetLTV + _ltvs.minAdjustThreshold,
+            "!ltv"
+        ); // dev: ltv in target
+    }
+
     /**
      * @notice Claims summerfi ajna rewards
      *
@@ -626,12 +678,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
         bool _closePosition = _repaymentAmount == _debt &&
             (_assetToFree == 0 || _assetToFree >= _totalDebt());
-
-        console.log("close: %s", _closePosition);
-        console.log("ra: %s", _repaymentAmount);
-        console.log("d: %s", _debt);
-        console.log("_assetToFree: %s", _assetToFree);
-        console.log("ta: %s", _totalDebt());
 
         _swapAndLeverDown(
             _repaymentAmount,
@@ -857,20 +903,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         IUniswapV3Pool _uniswapPool = IUniswapV3Pool(
             UNISWAP_FACTORY.getPool(address(asset), WETH, _fee)
         );
-        // IUniswapV3Pool _uniswapPool = IUniswapV3Pool(
-        //     PoolAddress.computeAddress(
-        //         UNISWAP_FACTORY,
-        //         PoolAddress.getPoolKey(address(asset), WETH, _fee)
-        //     )
-        // );
-        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).token0);
-        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).token1);
-        // console.log(PoolAddress.getPoolKey(address(asset), WETH, _fee).fee);
-        console.log("up: %s", address(_uniswapPool));
-        // console.log("asset: %s", address(asset));
-        // console.log("weth: %s", WETH);
-        // console.log("fee: %s", _fee);
-        // console.log("factory: %s", UNISWAP_FACTORY);
         require(
             _uniswapPool.token0() == address(asset) ||
                 _uniswapPool.token1() == address(asset)

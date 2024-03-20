@@ -24,9 +24,6 @@ contract OperationTest is Setup {
     }
 
     function test_operation(uint256 _amount) public {
-        vm.prank(management);
-        strategy.setUniswapFee(100);
-
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
         // Deposit into strategy
@@ -311,31 +308,5 @@ contract OperationTest is Setup {
 
         (trigger, ) = strategy.tendTrigger();
         assertTrue(!trigger);
-    }
-
-    function checkLTV() internal {
-        checkLTV(true);
-    }
-
-    function checkLTV(bool canBeZero) internal {
-        checkLTV(canBeZero, false);
-    }
-
-    function checkLTV(bool canBeZero, bool onlyCheckTooHigh) internal {
-        if (canBeZero && strategy.currentLTV() == 0) return;
-        if (onlyCheckTooHigh) {
-            assertLe(
-                strategy.currentLTV(),
-                strategy.ltvs().targetLTV + strategy.ltvs().minAdjustThreshold,
-                "!checkLtv"
-            );
-        } else {
-            assertApproxEq(
-                strategy.currentLTV(),
-                strategy.ltvs().targetLTV,
-                strategy.ltvs().minAdjustThreshold,
-                "!checkLtv"
-            );
-        }
     }
 }

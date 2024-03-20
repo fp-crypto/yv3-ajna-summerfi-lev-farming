@@ -13,6 +13,8 @@ import {IEvents} from "@tokenized-strategy/interfaces/IEvents.sol";
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {ERC20PoolFactory} from "@ajna-core/ERC20PoolFactory.sol";
 
+import {Helpers} from "./Helpers.sol";
+
 interface IFactory {
     function governance() external view returns (address);
 
@@ -22,6 +24,8 @@ interface IFactory {
 }
 
 contract Setup is ExtendedTest, IEvents {
+    using Helpers for IStrategyInterface;
+
     // Contract instances that we will use repeatedly.
     ERC20 public asset;
     IStrategyInterface public strategy;
@@ -99,7 +103,7 @@ contract Setup is ExtendedTest, IEvents {
         // set management of the strategy
         _strategy.setPendingManagement(management);
         // set deposit limit
-        _strategy.setDepositLimit(2**256-1);
+        _strategy.setDepositLimit(2**256 - 1);
         IStrategyInterface.LTVConfig memory _ltvConfig = _strategy.ltvs();
         _ltvConfig.targetLTV = 0.85e18;
         // set target ltv
@@ -160,6 +164,17 @@ contract Setup is ExtendedTest, IEvents {
         WETH.approve(_ajnaPool, _amount);
         vm.prank(ajnaDepositor);
         IERC20Pool(_ajnaPool).addQuoteToken(_amount, 4130, type(uint256).max);
+    }
+
+    function totalIdle(IStrategyInterface _strategy) public view returns (uint256) {
+        return ERC20(_strategy.asset()).balanceOf(address(_strategy));
+    }
+
+    function totalDebt(IStrategyInterface _strategy) public view returns (uint256) {
+        uint256 _totalIdle = totalIdle(_strategy);
+        uint256 _totalAssets = _strategy.totalAssets();
+        if (_totalIdle >= _totalAssets) return 0;
+        return _totalAssets - _totalIdle;
     }
 
     // For checking the amounts in the strategy

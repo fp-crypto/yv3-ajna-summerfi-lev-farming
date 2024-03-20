@@ -32,8 +32,8 @@ library Helpers {
         );
         console.log("ETA: %i", strategy.estimatedTotalAssets());
         console.log("Total Assets: %i", strategy.totalAssets());
-        console.log("Total Debt: %i", strategy.totalDebt());
-        console.log("Total Idle: %i", strategy.totalIdle());
+        console.log("Total Debt: %i", totalDebt(strategy));
+        console.log("Total Idle: %i", totalIdle(strategy));
     }
 
     function generatePaperProfit(
@@ -64,7 +64,9 @@ library Helpers {
         IStrategyInterface strategy,
         uint256 _lstValue
     ) internal {
-        ISwapRouter router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+        ISwapRouter router = ISwapRouter(
+            0xE592427A0AEce92De3Edee1F18E0157C05861564
+        );
         address weth = strategy.WETH();
         address asset = strategy.asset();
 
@@ -101,5 +103,24 @@ library Helpers {
 
     function abs(int256 x) internal pure returns (uint256) {
         return uint256(x >= 0 ? x : -x);
+    }
+
+    function totalIdle(IStrategyInterface _strategy)
+        internal
+        view
+        returns (uint256)
+    {
+        return ERC20(_strategy.asset()).balanceOf(address(_strategy));
+    }
+
+    function totalDebt(IStrategyInterface _strategy)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 _totalIdle = totalIdle(_strategy);
+        uint256 _totalAssets = _strategy.totalAssets();
+        if (_totalIdle >= _totalAssets) return 0;
+        return _totalAssets - _totalIdle;
     }
 }

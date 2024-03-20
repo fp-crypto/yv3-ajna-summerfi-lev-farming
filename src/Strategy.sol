@@ -49,8 +49,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     bytes4 private immutable unwrappedToWrappedSelector;
 
     IUniswapV3Pool public uniswapPool;
-    bool private flashloanActive;
-    bool private positionOpen;
+    bool public positionOpen;
 
     uint16 public maxFlashloanFeeBps;
     uint16 public slippageAllowedBps = 50;
@@ -150,17 +149,13 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      *          PUBLIC VIEW FUNCTIONS          *
      *******************************************/
 
-    function totalDebt() public view returns (uint256) {
-        uint256 _totalAssets = TokenizedStrategy.totalAssets();
-        uint256 _totalIdle = totalIdle();
-        if (_totalIdle > _totalAssets) return 0;
-        return _totalAssets - _totalIdle;
-    }
-
-    function totalIdle() public view returns (uint256) {
-        return asset.balanceOf(address(this));
-    }
-
+    /**
+     *  @notice Retrieves info related to our debt position
+     *  @return _debt             Current debt owed (`WAD`).
+     *  @return _collateral       Pledged collateral, including encumbered (`WAD`).
+     *  @return _t0Np             `Neutral price` (`WAD`).
+     *  @return _thresholdPrice   Borrower's `Threshold Price` (`WAD`).
+     */
     function positionInfo()
         external
         view
@@ -174,6 +169,9 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         return _positionInfo();
     }
 
+    /**
+     *  @return . The strategy's current LTV
+     */
     function currentLTV() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         return _calculateLTV(_debt, _collateral, _getAssetPerWeth());
@@ -627,14 +625,13 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         }
 
         bool _closePosition = _repaymentAmount == _debt &&
-            (_assetToFree == 0 ||
-                _assetToFree >= totalDebt());
+            (_assetToFree == 0 || _assetToFree >= _totalDebt());
 
         console.log("close: %s", _closePosition);
         console.log("ra: %s", _repaymentAmount);
         console.log("d: %s", _debt);
         console.log("_assetToFree: %s", _assetToFree);
-        console.log("ta: %s", totalDebt());
+        console.log("ta: %s", _totalDebt());
 
         _swapAndLeverDown(
             _repaymentAmount,
@@ -795,6 +792,25 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     /**************************************************
      *               INTERNAL VIEWS                   *
      **************************************************/
+
+    /**
+     *  @notice Returns the strategy assets which are held as loose asset
+     *  @return . The strategy's loose asset
+     */
+    function _totalIdle() public view returns (uint256) {
+        return asset.balanceOf(address(this));
+    }
+
+    /**
+     *  @notice Returns the strategy assets which are not idle
+     *  @return . The strategy's total debt
+     */
+    function _totalDebt() public view returns (uint256) {
+        uint256 _totalAssets = TokenizedStrategy.totalAssets();
+        uint256 _idle = _totalIdle();
+        if (_idle > _totalAssets) return 0;
+        return _totalAssets - _idle;
+    }
 
     /**
      *  @notice Retrieves info related to our debt position

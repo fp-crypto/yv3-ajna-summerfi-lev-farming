@@ -9,6 +9,10 @@ interface IStrategyInterface is IStrategy {
     function summerfiAccount() external view returns (address);
 
     function ajnaPool() external view returns (address);
+    
+    function uniswapPool() external view returns (address);
+    
+    function positionOpen() external view returns (bool);
 
     function chainlinkOracle() external view returns (address);
 
@@ -25,12 +29,6 @@ interface IStrategyInterface is IStrategy {
         uint64 emergencyThreshold;
     }
     
-    function totalAssets() external view returns (uint256);
-
-    function totalIdle() external view returns (uint256);
-
-    function totalDebt() external view returns (uint256);
-
     function ltvs() external view returns (LTVConfig memory);
 
     function positionInfo()

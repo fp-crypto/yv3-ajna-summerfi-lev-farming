@@ -8,6 +8,7 @@ import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {IUniswapV3Factory} from "@uniswap-v3-core/interfaces/IUniswapV3Factory.sol";
+import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
 
 import {IWETH} from "./interfaces/IWeth.sol";
 import {IAccount} from "./interfaces/summerfi/IAccount.sol";
@@ -19,9 +20,9 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 // import "forge-std/console.sol"; // TODO: delete
 
 // TODO:
-//  1. Implement swap ajna -> asset
+//  1. Test auction ajna -> asset
 
-contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
+contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
     IAccountFactory private constant SUMMERFI_ACCOUNT_FACTORY =
@@ -45,11 +46,13 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     bool public immutable oracleWrapped;
     bytes4 private immutable unwrappedToWrappedSelector;
 
-    IUniswapV3Pool public uniswapPool;
-    bool public positionOpen;
+    uint96 public minAjnaToAuction = 1000e18; // 1000 ajna
 
-    uint16 public slippageAllowedBps = 50;
-    uint64 public maxTendBasefee = 30e9;
+    IUniswapV3Pool public uniswapPool;
+
+    bool public positionOpen;
+    uint16 public slippageAllowedBps = 50; // 0.50%
+    uint64 public maxTendBasefee = 30e9; // 30 gwei
     uint256 public depositLimit;
 
     struct LTVConfig {
@@ -102,6 +105,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         ltvs = _ltvs;
 
         _setUniswapFee(_uniswapFee);
+        _enableAuction(AJNA_TOKEN, address(asset));
     }
 
     /*******************************************
@@ -216,6 +220,20 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      */
     function setMaxTendBasefee(uint64 _maxTendBasefee) external onlyManagement {
         maxTendBasefee = _maxTendBasefee;
+    }
+
+    function setMinAjnaToAuction(uint96 _minAjnaToAuction)
+        external
+        onlyManagement
+    {
+        minAjnaToAuction = _minAjnaToAuction;
+    }
+
+    function setAuction(address _auction) external onlyEmergencyAuthorized {
+        if (_auction != address(0)) {
+            require(Auction(_auction).want() == address(asset)); // dev: wrong want
+        }
+        auction = _auction;
     }
 
     /***********************************************
@@ -470,6 +488,17 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         _freeFunds(_amount);
         //(uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         //_swapAndLeverDown(_debt, _amount, true, _getAssetPerWeth());
+    }
+
+    function _auctionKicked(address _token)
+        internal
+        virtual
+        override
+        returns (uint256 _kicked)
+    {
+        require(_token == AJNA_TOKEN); // dev: only sell ajna
+        _kicked = super._auctionKicked(_token);
+        require(_kicked >= minAjnaToAuction); // dev: too little
     }
 
     /**************************************************

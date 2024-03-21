@@ -18,9 +18,11 @@ interface IStrategyInterface is IStrategy {
 
     function oracleWrapped() external view returns (address);
 
+    function maxTendBasefee() external view returns (uint64);
+
     function depositLimit() external view returns (uint256);
 
-    function maxTendBasefee() external view returns (uint64);
+    function minAjnaToAuction() external view returns (uint96);
 
     function slippageAllowedBps() external view returns (uint256);
 
@@ -57,6 +59,8 @@ interface IStrategyInterface is IStrategy {
     function setUniswapFee(uint24 _fee) external;
 
     function setDepositLimit(uint256 _depositLimit) external;
+    
+    function setMinAjnaToAuction(uint96 _minAjna) external;
 
     function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
 

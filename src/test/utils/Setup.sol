@@ -213,23 +213,23 @@ contract Setup is ExtendedTest, IEvents {
         strategy.setPerformanceFee(_performanceFee);
     }
 
-    function checkLTV() internal {
+    function checkLTV() public {
         checkLTV(true);
     }
 
-    function checkLTV(uint64 targetLTV) internal {
+    function checkLTV(uint64 targetLTV) public {
         checkLTV(true, false, targetLTV);
     }
 
-    function checkLTV(bool canBeZero) internal {
+    function checkLTV(bool canBeZero) public {
         checkLTV(canBeZero, false);
     }
 
-    function checkLTV(bool canBeZero, bool onlyCheckTooHigh) internal {
+    function checkLTV(bool canBeZero, bool onlyCheckTooHigh) public {
         checkLTV(canBeZero, onlyCheckTooHigh, strategy.ltvs().targetLTV);
     }
 
-    function checkLTV(bool canBeZero, bool onlyCheckTooHigh, uint64 targetLTV) internal {
+    function checkLTV(bool canBeZero, bool onlyCheckTooHigh, uint64 targetLTV) public {
         if (canBeZero && strategy.currentLTV() == 0) return;
         if (onlyCheckTooHigh) {
             assertLe(

@@ -16,11 +16,10 @@ import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
-import "forge-std/console.sol"; // TODO: delete
+// import "forge-std/console.sol"; // TODO: delete
 
 // TODO:
 //  1. Implement swap ajna -> asset
-//  2. Fully flesh out tend trigger
 
 contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     using SafeERC20 for ERC20;
@@ -44,15 +43,14 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     IERC20Pool public immutable ajnaPool;
     IChainlinkAggregator public immutable chainlinkOracle;
     bool public immutable oracleWrapped;
-
     bytes4 private immutable unwrappedToWrappedSelector;
 
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
 
     uint16 public slippageAllowedBps = 50;
+    uint64 public maxTendBasefee = 30e9;
     uint256 public depositLimit;
-    uint256 public maxTendBasefee = 30e9;
 
     struct LTVConfig {
         uint64 targetLTV;
@@ -146,7 +144,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      */
     function estimatedTotalAssets() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        uint256 _idle = asset.balanceOf(address(this));
+        uint256 _idle = _totalIdle();
         return
             _calculateNetPositionWithMaxSlippage(
                 _debt,
@@ -164,7 +162,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     function estimatedTotalAssetsNoSlippage() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         // increase debt by max slippage, since we must swap all debt to exit our position
-        uint256 _idle = asset.balanceOf(address(this));
+        uint256 _idle = _totalIdle();
         return
             _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
             _idle;
@@ -216,10 +214,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      * @notice Sets the max base fee for tends. Can only be called by management
      * @param _maxTendBasefee The maximum base fee allowed in non-emergency tends
      */
-    function setMaxTendBasefee(uint256 _maxTendBasefee)
-        external
-        onlyManagement
-    {
+    function setMaxTendBasefee(uint64 _maxTendBasefee) external onlyManagement {
         maxTendBasefee = _maxTendBasefee;
     }
 
@@ -319,7 +314,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         override
         returns (uint256 _totalAssets)
     {
-        _adjustPosition(asset.balanceOf(address(this)));
+        _adjustPosition(_totalIdle());
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
             _calculateNetPositionWithMaxSlippage(
@@ -327,7 +322,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
                 _collateral,
                 _getAssetPerWeth()
             ) +
-            asset.balanceOf(address(this));
+            _totalIdle();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -355,11 +350,11 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      * after this has finished and will have no effect on PPS of the strategy
      * till report() is called.
      *
-     * @param _totalIdle The current amount of idle funds that are available to deploy.
+     * @param _idle The current amount of idle funds that are available to deploy.
      *
      */
-    function _tend(uint256 _totalIdle) internal override {
-        _adjustPosition(_totalIdle);
+    function _tend(uint256 _idle) internal override {
+        _adjustPosition(_idle);
     }
 
     /**
@@ -370,7 +365,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
      *
      */
     function _tendTrigger() internal view override returns (bool) {
-        if (TokenizedStrategy.totalAssets() == 0) {
+        if (TokenizedStrategy.totalAssets() == 0 || !positionOpen) {
             return false;
         }
 
@@ -381,14 +376,15 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             uint256 _thresholdPrice
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
-        uint256 _price = _getAssetPerWeth();
-        uint256 _currentLtv = _calculateLTV(_debt, _collateral, _price);
+        uint256 _assetPerWeth = _getAssetPerWeth();
+        uint256 _wethPerAsset = (ONE_WAD**2) / _assetPerWeth;
+        uint256 _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
 
         // We need to lever down if the LTV is past the emergencyThreshold
         // or the price is below the threshold price
         if (
             _currentLtv >= _ltvs.targetLTV + _ltvs.emergencyThreshold ||
-            _price <= _thresholdPrice
+            _wethPerAsset <= _thresholdPrice
         ) {
             return true;
         }
@@ -399,7 +395,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         }
 
         // Tend if ltv is higher than the target range
-        if (_currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold) {
+        if (_currentLtv >= _ltvs.targetLTV + _ltvs.warningThreshold) {
             return true;
         }
 
@@ -408,18 +404,12 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         }
 
         // Tend if ltv is lower than target range
-        if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
+        if (
+            _currentLtv != 0 &&
+            _currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold
+        ) {
             return true;
         }
-
-        // TODO: implement loose asset tend trigger
-        // if (
-        //     _balanceOfAsset() >= depositTrigger &&
-        //     _maxDepositableCollateral() >= depositTrigger &&
-        //     block.timestamp - lastDeposit > minDepositInterval
-        // ) {
-        //     return true;
-        // }
 
         return false;
     }
@@ -545,7 +535,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     /**
      * @notice Adjusts the leveraged position
      */
-    function _adjustPosition(uint256 _totalIdle) internal {
+    function _adjustPosition(uint256 _idle) internal {
         (
             uint256 _debt,
             uint256 _collateral,
@@ -564,7 +554,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         ) {
             _leverDown(_debt, _collateral, 0, _ltvs, _assetPerWeth);
         } else if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
-            _leverUp(_debt, _collateral, _totalIdle, _ltvs, _assetPerWeth);
+            _leverUp(_debt, _collateral, _idle, _ltvs, _assetPerWeth);
         } else {
             return; // bail out if we are doing nothing
         }
@@ -596,7 +586,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
     function _leverUp(
         uint256 _debt,
         uint256 _collateral,
-        uint256 _totalIdle,
+        uint256 _idle,
         LTVConfig memory _ltvs,
         uint256 _assetPerWeth
     ) internal {
@@ -607,7 +597,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
         );
 
         uint256 _targetBorrow = _getBorrowFromSupply(
-            _supply + _totalIdle,
+            _supply + _idle,
             _ltvs.targetLTV,
             _assetPerWeth
         );
@@ -652,7 +642,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
 
             if (_targetBorrow < _minLoanSize()) {
                 _targetBorrow = 0;
-                console.log("min loan");
             }
         }
 
@@ -787,7 +776,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
                 _leverData.assetPerWeth) / ONE_WAD;
             require(_amountReceived >= _leastAssetReceived, "!slippage"); // dev: too much slippage
 
-            uint256 _collateralToAdd = asset.balanceOf(address(this));
+            uint256 _collateralToAdd = _totalIdle();
             if (!positionOpen) {
                 positionOpen = true;
                 _openPosition(_amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
@@ -807,7 +796,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
             require(_amountToPay <= _mostAssetToPay, "!slippage"); // dev: too much slippage
 
             if (_amountToPay > _expectedAssetToPay) {
-                console.log("Slippage to withdraw amount");
                 // pass slippage onto the asset to free amount
                 uint256 _slippage = _amountToPay - _expectedAssetToPay;
                 if (_leverData.assetToFree > _slippage) {
@@ -815,10 +803,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback {
                 } else {
                     _leverData.assetToFree = 0;
                 }
-            }
-
-            if (_amountToPay < _expectedAssetToPay) {
-                console.log("You got a discount");
             }
 
             if (_leverData.action == LeverAction.LeverDown) {

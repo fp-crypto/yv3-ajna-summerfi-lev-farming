@@ -20,6 +20,8 @@ interface IStrategyInterface is IStrategy {
 
     function depositLimit() external view returns (uint256);
 
+    function maxTendBasefee() external view returns (uint64);
+
     function slippageAllowedBps() external view returns (uint256);
 
     struct LTVConfig {
@@ -58,7 +60,7 @@ interface IStrategyInterface is IStrategy {
 
     function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
 
-    function setMaxTendBasefee(uint256 _maxTendBasefee) external;
+    function setMaxTendBasefee(uint64 _maxTendBasefee) external;
 
     function manualLeverDown(
         uint256 _toLoose,

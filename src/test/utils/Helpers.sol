@@ -41,15 +41,26 @@ library Helpers {
         IStrategyInterface strategy,
         uint256 time
     ) internal returns (uint256 _lstValue) {
+        return
+            generatePaperProfitOrLoss(
+                vm,
+                strategy,
+                int256((LST_YIELD_PER_YEAR_BPS * time) / SECONDS_PER_YEAR)
+            );
+    }
+
+    function generatePaperProfitOrLoss(
+        Vm vm,
+        IStrategyInterface strategy,
+        int256 pnlBps
+    ) internal returns (uint256 _lstValue) {
         IChainlinkAggregator oracle = IChainlinkAggregator(
             strategy.chainlinkOracle()
         );
 
         _lstValue =
             (uint256(oracle.latestAnswer()) *
-                (MAX_BPS +
-                    (LST_YIELD_PER_YEAR_BPS * time) /
-                    SECONDS_PER_YEAR)) /
+                uint256(int256(MAX_BPS) + pnlBps)) /
             MAX_BPS;
 
         vm.mockCall(

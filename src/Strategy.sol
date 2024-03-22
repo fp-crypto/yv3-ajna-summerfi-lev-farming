@@ -628,10 +628,15 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
         }
 
         require(_targetBorrow > _debt); // dev: something is very wrong
-        uint256 _toBorrow = _targetBorrow - _debt;
 
         if (_targetBorrow < _minLoanSize()) {
             return;
+        }
+
+        uint256 _toBorrow = _targetBorrow - _debt;
+        uint256 _availableBorrow = _availableWethBorrow();
+        if (_availableBorrow < _toBorrow) {
+            _toBorrow = _availableBorrow;
         }
 
         _swapAndLeverUp(_toBorrow, _assetPerWeth);
@@ -885,6 +890,26 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
                 address(ajnaPool),
                 address(summerfiAccount)
             );
+    }
+
+    /**
+     *  @notice Returns the amount of quote token available for borrowing or removing from pool.
+     *  @dev    Calculated as the difference between pool balance and escrowed amounts locked in
+     *  pool (auction bons + unclaimed reserves).
+     *  @return _amount   The total quote token amount available to borrow or to be removed from pool, in `WAD` units.
+     */
+    function _availableWethBorrow() internal view returns (uint256 _amount) {
+        //return POOL_INFO_UTILS.availableQuoteTokenAmount(address(ajnaPool));
+        // TODO: copied from BUSL, am i going to open source jail?
+        (uint256 bondEscrowed, uint256 unclaimedReserve, , , ) = ajnaPool
+            .reservesInfo();
+        uint256 escrowedAmounts = bondEscrowed + unclaimedReserve;
+
+        uint256 poolBalance = ERC20(WETH).balanceOf(address(ajnaPool)) *
+            ajnaPool.quoteTokenScale();
+
+        if (poolBalance > escrowedAmounts)
+            _amount = poolBalance - escrowedAmounts;
     }
 
     /**

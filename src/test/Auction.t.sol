@@ -22,7 +22,7 @@ contract OperationTest is Setup {
         );
         vm.prank(auction.governance());
         auctionId = auction.enable(strategy.AJNA_TOKEN(), address(strategy));
-        auction.setHookFlags(false, true, false, false);
+        auction.setHookFlags(true, true, false, false);
     }
 
     function test_auction(uint256 _amount) public {

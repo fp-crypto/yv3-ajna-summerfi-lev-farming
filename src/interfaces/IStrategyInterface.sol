@@ -6,11 +6,15 @@ import {IStrategy} from "@tokenized-strategy/interfaces/IStrategy.sol";
 interface IStrategyInterface is IStrategy {
     function WETH() external view returns (address);
 
+    function AJNA_TOKEN() external view returns (address);
+
     function summerfiAccount() external view returns (address);
 
     function ajnaPool() external view returns (address);
 
     function uniswapPool() external view returns (address);
+
+    function auctionFactory() external view returns (address);
 
     function positionOpen() external view returns (bool);
 
@@ -59,12 +63,14 @@ interface IStrategyInterface is IStrategy {
     function setUniswapFee(uint24 _fee) external;
 
     function setDepositLimit(uint256 _depositLimit) external;
-    
+
     function setMinAjnaToAuction(uint96 _minAjna) external;
 
     function setSlippageAllowedBps(uint16 _slippageAllowedBps) external;
 
     function setMaxTendBasefee(uint64 _maxTendBasefee) external;
+
+    function setAuction(address _auction) external;
 
     function manualLeverDown(
         uint256 _toLoose,

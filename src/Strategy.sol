@@ -19,9 +19,6 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 
 // import "forge-std/console.sol"; // TODO: delete
 
-// TODO:
-//  1. Test auction ajna -> asset
-
 contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
@@ -519,11 +516,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     ) external onlyManagement {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
-        uint256 _positionValue = _calculateNetPosition(
-            _debt,
-            _collateral,
-            _price
-        );
 
         LTVConfig memory _ltvs = ltvs;
         require(_force || _targetLTV <= ltvs.targetLTV); // dev: _targetLTV too high

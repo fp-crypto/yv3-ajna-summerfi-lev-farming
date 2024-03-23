@@ -49,6 +49,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     IChainlinkAggregator public immutable chainlinkOracle;
     bool public immutable oracleWrapped;
     bytes4 private immutable unwrappedToWrappedSelector;
+    bool private immutable uniswapAsset0Weth1;
 
     uint96 public minAjnaToAuction = 1000e18; // 1000 ajna
 
@@ -99,6 +100,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
         unwrappedToWrappedSelector = _unwrappedToWrappedSelector;
         chainlinkOracle = IChainlinkAggregator(_chainlinkOracle);
         oracleWrapped = _oracleWrapped;
+        uniswapAsset0Weth1 = address(asset) < WETH;
 
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
 
@@ -722,7 +724,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     function _swapAndLeverUp(uint256 _borrowAmount, uint256 _assetPerWeth)
         private
     {
-        bool zeroForOne = WETH < address(asset);
+        bool zeroForOne = !uniswapAsset0Weth1;
 
         bytes memory _data = abi.encode(
             LeverData(LeverAction.LeverUp, uint256(0), _assetPerWeth)
@@ -748,7 +750,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
         bool _close,
         uint256 _assetPerWeth
     ) private {
-        bool zeroForOne = address(asset) < WETH;
+        bool zeroForOne = uniswapAsset0Weth1;
 
         bytes memory _data = abi.encode(
             LeverData(
@@ -787,7 +789,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     ) external {
         require(msg.sender == address(uniswapPool)); // dev: callback only called by pool
         require(_amount0Delta > 0 || _amount1Delta > 0); // dev: swaps entirely within 0-liquidity regions are not supported
-        bool wethIsToken0 = WETH < address(asset);
 
         (
             bool _isExactInput,
@@ -795,12 +796,12 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _amountReceived
         ) = _amount0Delta > 0
                 ? (
-                    wethIsToken0,
+                    !uniswapAsset0Weth1,
                     uint256(_amount0Delta),
                     uint256(-_amount1Delta)
                 )
                 : (
-                    !wethIsToken0,
+                    uniswapAsset0Weth1,
                     uint256(_amount1Delta),
                     uint256(-_amount0Delta)
                 );

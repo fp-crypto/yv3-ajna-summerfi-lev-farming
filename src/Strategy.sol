@@ -542,16 +542,16 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     /**
      * @notice Allows emergency authorized to manually repay and/or withdrwa
      *
-     * @param  _debtAmount     Amount of debt to repay
+     * @param  _debtAmount       Amount of debt to repay
      * @param  _collateralAmount Amount of collateral to withdraw
-     * @param  _stamp      Whether to stamp the loan or not
+     * @param  _stamp            Whether to stamp the loan or not
      */
     function manualRepayWithdraw(
-        uint256 _debt,
-        uint64 _collateral,
+        uint256 _debtAmount,
+        uint64 _collateralAmount,
         bool _stamp
     ) external onlyEmergencyAuthorized {
-        _repayWithdraw(_debt, _collateral, _stamp);
+        _repayWithdraw(_debtAmount, _collateralAmount, _stamp);
     }
 
     /**
@@ -651,10 +651,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
 
         require(_targetBorrow > _debt); // dev: something is very wrong
 
-        if (_targetBorrow < _minLoanSize()) {
-            return;
-        }
-
         uint256 _toBorrow = _targetBorrow - _debt;
         uint256 _availableBorrow = _availableWethBorrow();
         if (_availableBorrow < _toBorrow) {
@@ -693,17 +689,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
             }
         }
 
-        uint256 _repaymentAmount;
-        if (_debt > _targetBorrow) {
-            unchecked {
-                _repaymentAmount = _debt - _targetBorrow;
-            }
-        } else {
-            _repaymentAmount = 0;
-        }
-
-        if (_repaymentAmount == 0) {
-            //< DUST_THRESHOLD) {
+        if (_debt <= _targetBorrow) {
             if (_assetToFree > DUST_THRESHOLD) {
                 if (_assetToFree > _collateral) {
                     _assetToFree = _collateral;
@@ -711,6 +697,11 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
                 _repayWithdraw(0, _assetToFree, false);
             }
             return;
+        }
+
+        uint256 _repaymentAmount;
+        unchecked {
+            _repaymentAmount = _debt - _targetBorrow;
         }
 
         bool _closePosition = _repaymentAmount == _debt &&

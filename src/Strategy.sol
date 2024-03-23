@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
@@ -16,6 +17,12 @@ import {IAccountFactory} from "./interfaces/summerfi/IAccountFactory.sol";
 import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
+
+import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
+
+import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
+
+import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
 
 // import "forge-std/console.sol"; // TODO: delete
 
@@ -503,7 +510,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
      **************************************************/
 
     /**
-     * @notice Allows management to manually lever down
+     * @notice Allows emergency authorized to manually lever down
      *
      * @param _toLoose the amount of assets to attempt to loose
      * @param _targetLTV the LTV ratio to target
@@ -513,7 +520,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _toLoose,
         uint64 _targetLTV,
         bool _force
-    ) external onlyManagement {
+    ) external onlyEmergencyAuthorized {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
 
@@ -530,6 +537,21 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
                 _ltvs.targetLTV + _ltvs.minAdjustThreshold,
             "!ltv"
         ); // dev: ltv in target
+    }
+
+    /**
+     * @notice Allows emergency authorized to manually repay and/or withdrwa
+     *
+     * @param  _debtAmount     Amount of debt to repay
+     * @param  _collateralAmount Amount of collateral to withdraw
+     * @param  _stamp      Whether to stamp the loan or not
+     */
+    function manualRepayWithdraw(
+        uint256 _debt,
+        uint64 _collateral,
+        bool _stamp
+    ) external onlyEmergencyAuthorized {
+        _repayWithdraw(_debt, _collateral, _stamp);
     }
 
     /**
@@ -885,10 +907,43 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _thresholdPrice
         )
     {
-        return
-            POOL_INFO_UTILS.borrowerInfo(
-                address(ajnaPool),
-                address(summerfiAccount)
+        //return
+        //    POOL_INFO_UTILS.borrowerInfo(
+        //        address(ajnaPool),
+        //        address(summerfiAccount)
+        //    );
+
+        // TODO: copied from BUSL, am i going to open source jail?
+        (uint256 inflator, uint256 lastInflatorUpdate) = ajnaPool
+            .inflatorInfo();
+
+        (uint256 interestRate, ) = ajnaPool.interestRateInfo();
+
+        uint256 pendingInflator = PoolCommons.pendingInflator(
+            inflator,
+            lastInflatorUpdate,
+            interestRate
+        );
+
+        uint256 t0Debt;
+        uint256 npTpRatio;
+        (t0Debt, _collateral, npTpRatio) = ajnaPool.borrowerInfo(
+            address(summerfiAccount)
+        );
+
+        _t0Np = _collateral == 0
+            ? 0
+            : Math.mulDiv(
+                Maths.wmul(t0Debt, COLLATERALIZATION_FACTOR),
+                npTpRatio,
+                _collateral
+            );
+        _debt = Maths.ceilWmul(t0Debt, pendingInflator);
+        _thresholdPrice = _collateral == 0
+            ? 0
+            : Maths.wmul(
+                Maths.wdiv(_debt, _collateral),
+                COLLATERALIZATION_FACTOR
             );
     }
 

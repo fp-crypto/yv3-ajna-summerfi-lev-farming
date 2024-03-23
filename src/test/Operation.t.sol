@@ -48,7 +48,10 @@ contract OperationTest is Setup {
         skip(1 days);
 
         Helpers.logStrategyInfo(strategy);
-
+        
+        // allow loss
+        vm.prank(management);
+        strategy.setDoHealthCheck(false);
         // Report profit
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();

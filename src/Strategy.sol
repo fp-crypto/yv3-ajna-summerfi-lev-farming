@@ -9,6 +9,7 @@ import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {IUniswapV3Factory} from "@uniswap-v3-core/interfaces/IUniswapV3Factory.sol";
+import {BaseHealthCheck} from "@periphery/Bases/HealthCheck/BaseHealthCheck.sol";
 import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
 
 import {IWETH} from "./interfaces/IWeth.sol";
@@ -26,7 +27,7 @@ import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
 
 // import "forge-std/console.sol"; // TODO: delete
 
-contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
+contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
     IAccountFactory private constant SUMMERFI_ACCOUNT_FACTORY =
@@ -69,7 +70,6 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
     LTVConfig public ltvs;
 
     uint256 private constant ONE_WAD = 1e18;
-    uint256 private constant MAX_BPS = 1e4; // 100% in basis points
     uint64 internal constant DEFAULT_MIN_ADJUST_THRESHOLD = 0.005e18;
     uint64 internal constant DEFAULT_WARNING_THRESHOLD = 0.01e18;
     uint64 internal constant DEFAULT_EMERGENCY_THRESHOLD = 0.02e18;
@@ -89,7 +89,7 @@ contract Strategy is BaseStrategy, IUniswapV3SwapCallback, AuctionSwapper {
         bytes4 _unwrappedToWrappedSelector,
         address _chainlinkOracle,
         bool _oracleWrapped
-    ) BaseStrategy(_asset, _name) {
+    ) BaseHealthCheck(_asset, _name) {
         require(_asset == IERC20Pool(_ajnaPool).collateralAddress(), "!collat"); // dev: asset must be collateral
         require(WETH == IERC20Pool(_ajnaPool).quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
 

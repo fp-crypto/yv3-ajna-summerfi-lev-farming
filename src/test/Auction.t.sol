@@ -65,6 +65,8 @@ contract OperationTest is Setup {
         skip(strategy.profitMaxUnlockTime());
 
         // Report profit
+        vm.prank(management);
+        strategy.setDoHealthCheck(false);
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();
         checkLTV(false);

@@ -2,15 +2,22 @@
 pragma solidity ^0.8.18;
 
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
+
+import {BaseHealthCheck} from "@periphery/Bases/HealthCheck/BaseHealthCheck.sol";
+import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
+
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
+import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
+import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
+import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
 import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
+
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {IUniswapV3Factory} from "@uniswap-v3-core/interfaces/IUniswapV3Factory.sol";
-import {BaseHealthCheck} from "@periphery/Bases/HealthCheck/BaseHealthCheck.sol";
-import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
 
 import {IWETH} from "./interfaces/IWeth.sol";
 import {IAccount} from "./interfaces/summerfi/IAccount.sol";
@@ -18,12 +25,6 @@ import {IAccountFactory} from "./interfaces/summerfi/IAccountFactory.sol";
 import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
-
-import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
-
-import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
-
-import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
 
 // import "forge-std/console.sol"; // TODO: delete
 
@@ -53,9 +54,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     bool private immutable uniswapAsset0Weth1;
 
     uint96 public minAjnaToAuction = 1000e18; // 1000 ajna
-
     IUniswapV3Pool public uniswapPool;
-
     bool public positionOpen;
     uint16 public slippageAllowedBps = 50; // 0.50%
     uint64 public maxTendBasefee = 30e9; // 30 gwei
@@ -557,6 +556,38 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     }
 
     /**
+     * @notice Allows emergency authorized to manually swap asset<->weth or vice versa
+     *
+     * @param  _amountIn        Amount of input token
+     * @param  _minOut          Minimum output token acceptable
+     * @param  _assetForWeth    Whether to swap asset for weth or weth for asset
+     */
+    function manualSwap(
+        uint256 _amountIn,
+        uint64 _minOut,
+        bool _assetForWeth
+    ) external onlyEmergencyAuthorized {
+        bool zeroForOne = uniswapAsset0Weth1 ? _assetForWeth : !_assetForWeth;
+        bytes memory _data = abi.encode(
+            LeverData(LeverAction.ManualSwap, uint256(0), 0)
+        );
+
+        (int256 amount0, int256 amount1) = uniswapPool.swap(
+            address(this),
+            zeroForOne,
+            int256(_amountIn),
+            (
+                zeroForOne
+                    ? UNISWAP_MIN_SQRT_RATIO + 1
+                    : UNISWAP_MAX_SQRT_RATIO - 1
+            ),
+            _data
+        );
+
+        require(uint256(zeroForOne ? amount1 : amount0) >= _minOut); // dev: !minOut
+    }
+
+    /**
      * @notice Claims summerfi ajna rewards
      *
      * Unguarded because there is no risk claiming
@@ -616,7 +647,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     enum LeverAction {
         LeverUp,
         LeverDown,
-        ClosePosition
+        ClosePosition,
+        ManualSwap
     }
 
     struct LeverData {
@@ -825,8 +857,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             }
 
             ERC20(WETH).transfer(msg.sender, _amountToPay);
-        } else {
-            // LeverDown || ClosePosition
+        } else if (
+            _leverData.action == LeverAction.LeverDown ||
+            _leverData.action == LeverAction.ClosePosition
+        ) {
             require(!_isExactInput); // dev: WTF
             uint256 _expectedAssetToPay = (_amountReceived *
                 _leverData.assetPerWeth) / ONE_WAD;
@@ -856,6 +890,17 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _repayAndClose(_amountReceived);
             }
             asset.transfer(msg.sender, _amountToPay);
+        } else if (_leverData.action == LeverAction.ManualSwap) {
+            require(_isExactInput); // dev: WTF
+
+            if (
+                (_amount0Delta > 0 && uniswapAsset0Weth1) ||
+                (_amount1Delta > 0 && !uniswapAsset0Weth1)
+            ) {
+                asset.transfer(msg.sender, _amountToPay);
+            } else {
+                ERC20(WETH).transfer(msg.sender, _amountToPay);
+            }
         }
     }
 

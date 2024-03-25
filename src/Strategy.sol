@@ -25,7 +25,6 @@ import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
 
 import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
 
-// import "forge-std/console.sol"; // TODO: delete
 
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
@@ -35,7 +34,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     AjnaProxyActions private constant SUMMERFI_AJNA_PROXY_ACTIONS =
         AjnaProxyActions(0x3637DF43F938b05A71bb828f13D9f14498E6883c);
     PoolInfoUtils private constant POOL_INFO_UTILS =
-        PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
+        PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE); // review: this ended up not being used.
     IAjnaRedeemer private constant SUMMERFI_REWARDS =
         IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
     IUniswapV3Factory private constant UNISWAP_FACTORY =
@@ -45,6 +44,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     address public constant AJNA_TOKEN =
         0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079;
 
+    // review: summerfi is upgradable, right? We are doomed if they break their api?
     IAccount public immutable summerfiAccount;
     IERC20Pool public immutable ajnaPool;
     IChainlinkAggregator public immutable chainlinkOracle;
@@ -52,7 +52,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     bytes4 private immutable unwrappedToWrappedSelector;
     bool private immutable uniswapAsset0Weth1;
 
-    uint96 public minAjnaToAuction = 1000e18; // 1000 ajna
+    uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna
 
     IUniswapV3Pool public uniswapPool;
 
@@ -97,9 +97,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
 
         ajnaPool = IERC20Pool(_ajnaPool);
         summerfiAccount = IAccount(_summerfiAccount);
-        unwrappedToWrappedSelector = _unwrappedToWrappedSelector;
-        chainlinkOracle = IChainlinkAggregator(_chainlinkOracle);
-        oracleWrapped = _oracleWrapped;
+        unwrappedToWrappedSelector = _unwrappedToWrappedSelector; // review: is there a way to check this selector exist?
+        chainlinkOracle = IChainlinkAggregator(_chainlinkOracle); // review: funny the interface doesn't show the asset. how do you make sure you got the right address?
+        oracleWrapped = _oracleWrapped; // review: another thing it would be nice to check if correct.
         uniswapAsset0Weth1 = address(asset) < WETH;
 
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
@@ -186,6 +186,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      * @notice Sets the ltv configuration. Can only be called by management
      * @param _ltvs The LTV configuration
      */
+     // review: mmmm I would prefer you do the primitive parameters separately.
+     // I am worried that in a war room we would be having struct/memory stuff issues when calling.
     function setLtvConfig(LTVConfig memory _ltvs) external onlyManagement {
         require(_ltvs.warningThreshold < _ltvs.emergencyThreshold); // dev: warning must be less than emergency threshold
         require(_ltvs.minAdjustThreshold < _ltvs.warningThreshold); // dev: minAdjust must be less than warning threshold
@@ -338,7 +340,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         override
         returns (uint256 _totalAssets)
     {
+        //review: in other strategies we are checking for balance > 0 to call adjust
         _adjustPosition(_totalIdle());
+
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
             _calculateNetPositionWithMaxSlippage(
@@ -423,7 +427,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             return true;
         }
 
-        if (TokenizedStrategy.isShutdown()) {
+        if (TokenizedStrategy.isShutdown()) { // review: move this check close to the top?
             return false;
         }
 
@@ -863,6 +867,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *               INTERNAL VIEWS                   *
      **************************************************/
 
+     // review: internal but very public
     /**
      *  @notice Returns the strategy assets which are held as loose asset
      *  @return . The strategy's loose asset
@@ -878,7 +883,13 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     function _totalDebt() public view returns (uint256) {
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
         uint256 _idle = _totalIdle();
+
+        // review: I understand that _totalDebt is just used in _leverDown and
+        // returning 0 doesn't affect logic,
+        // but if idle>totalAssets, might not be 0.
         if (_idle > _totalAssets) return 0;
+
+
         return _totalAssets - _idle;
     }
 
@@ -899,13 +910,13 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _thresholdPrice
         )
     {
+        // review: why not using pool info utils directly?
+
         //return
         //    POOL_INFO_UTILS.borrowerInfo(
         //        address(ajnaPool),
         //        address(summerfiAccount)
         //    );
-
-        // TODO: copied from BUSL, am i going to open source jail?
         (uint256 inflator, uint256 lastInflatorUpdate) = ajnaPool
             .inflatorInfo();
 
@@ -925,7 +936,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
 
         _t0Np = _collateral == 0
             ? 0
-            : Math.mulDiv(
+            : Math.mulDiv( // review: I guess you copy pasted this. but does it make sense to use Math and Maths together?
                 Maths.wmul(t0Debt, COLLATERALIZATION_FACTOR),
                 npTpRatio,
                 _collateral
@@ -964,7 +975,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @return Conversion rate
      */
     function _getAssetPerWeth() internal view returns (uint256) {
-        uint256 _answer = (ONE_WAD**2) /
+        uint256 _answer = (ONE_WAD**2) / // review: why **2?
             uint256(chainlinkOracle.latestAnswer());
         if (oracleWrapped) {
             return _answer;
@@ -1053,6 +1064,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         if (_debtAmount != 0) {
             IWETH(WETH).withdraw(_debtAmount); // summer contracts use Ether not WETH
         }
+
+        // review: I guess it doesn't matter if value is 0 here, right?
+        // review: dont' you want to do address(this).balance() just in case there is dust?
         summerfiAccount.execute{value: _debtAmount}(
             address(SUMMERFI_AJNA_PROXY_ACTIONS),
             abi.encodeCall(
@@ -1094,6 +1108,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         return abi.decode(data, (uint256));
     }
 
+    // review: pretty sure the helper has a method for this
     function _minLoanSize() internal view returns (uint256 _minDebtAmount) {
         IERC20Pool _ajnaPool = ajnaPool;
         (uint256 _poolDebt, , , ) = _ajnaPool.debtInfo();
@@ -1127,9 +1142,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _collateral,
         uint256 _assetPerWeth
     ) internal pure returns (uint256) {
-        if (_debt == 0 || _collateral == 0) {
+        if (_debt == 0 || _collateral == 0) { // review: well, if collateral==0 LTV is infinite :D
             return 0;
         }
+
         return (_debt * _assetPerWeth) / _collateral;
     }
 

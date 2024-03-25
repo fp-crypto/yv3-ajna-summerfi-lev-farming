@@ -159,7 +159,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called internally to add an amount of credit at a specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  amount       The maximum amount of quote token to be moved by a lender.
      *  @param  price        The price the bucket to which the quote tokens will be added.
      *  @dev price of uint (10**decimals) collateral token in debt token (10**decimals) with 3 decimal points for instance
@@ -183,7 +183,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called internally to move max amount of credit from a specified price bucket to another specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  oldPrice        The price of the bucket  from which the quote tokens will be removed.
      *  @param  newPrice     The price of the bucket to which the quote tokens will be added.
      */
@@ -203,7 +203,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called internally to remove an amount of credit at a specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  amount       The maximum amount of quote token to be moved by a lender.
      *  @param  price        The price the bucket to which the quote tokens will be added.
      *  @dev price of uint (10**decimals) collateral token in debt token (10**decimals) with 3 decimal points for instance
@@ -237,7 +237,7 @@ contract AjnaProxyActions {
 
     /**
      * @notice Reclaims collateral from liquidated bucket
-     * @param  pool         Address of the Ajana Pool.
+     * @param  pool         Address of the Ajna Pool.
      * @param  price        Price of the bucket to redeem.
      */
     function _removeCollateral(IERC20Pool pool, uint256 price)
@@ -567,7 +567,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called by lenders to add an amount of credit at a specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  amount       The maximum amount of quote token to be moved by a lender.
      *  @param  price        The price the bucket to which the quote tokens will be added.
 
@@ -586,7 +586,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called by lenders to remove an amount of credit at a specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  amount       The maximum amount of quote token to be moved by a lender.
      *  @param  price        The price the bucket to which the quote tokens will be added.
      *  @dev price of uint (10**decimals) collateral token in debt token (10**decimals) with 3 decimal points for instance
@@ -603,7 +603,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Called by lenders to move max amount of credit from a specified price bucket to another specified price bucket.
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  oldPrice        The price of the bucket  from which the quote tokens will be removed.
      *  @param  newPrice     The price of the bucket to which the quote tokens will be added.
 
@@ -621,7 +621,7 @@ contract AjnaProxyActions {
     /**
      *  @notice Called by lenders to move an amount of credit from a specified price bucket to another specified price bucket,
      *  @notice whilst adding additional amount.
-     *  @param  pool            Address of the Ajana Pool.
+     *  @param  pool            Address of the Ajna Pool.
      *  @param  amountToAdd     The maximum amount of quote token to be moved by a lender.
      *  @param  oldPrice        The price of the bucket  from which the quote tokens will be removed.
      *  @param  newPrice        The price of the bucket to which the quote tokens will be added.
@@ -644,7 +644,7 @@ contract AjnaProxyActions {
     /**
      *  @notice Called by lenders to move an amount of credit from a specified price bucket to another specified price bucket,
      *  @notice whilst withdrawing additional amount.
-     *  @param  pool            Address of the Ajana Pool.
+     *  @param  pool            Address of the Ajna Pool.
      *  @param  amountToWithdraw     Amount of quote token to be withdrawn by a lender.
      *  @param  oldPrice        The price of the bucket  from which the quote tokens will be removed.
      *  @param  newPrice        The price of the bucket to which the quote tokens will be added.
@@ -664,7 +664,7 @@ contract AjnaProxyActions {
 
     /**
      * @notice Reclaims collateral from liquidated bucket
-     * @param  pool         Address of the Ajana Pool.
+     * @param  pool         Address of the Ajna Pool.
      * @param  price        Price of the bucket to redeem.
      */
     function removeCollateral(IERC20Pool pool, uint256 price) public {
@@ -702,7 +702,7 @@ contract AjnaProxyActions {
 
     /**
      *  @notice Get the amount of quote token deposited to a specific bucket
-     *  @param  pool         Address of the Ajana Pool.
+     *  @param  pool         Address of the Ajna Pool.
      *  @param  price        Price of the bucket to query
      *  @return  quoteAmount Amount of quote token deposited to dpecific bucket
      *  @dev price of uint (10**decimals) collateral token in debt token (10**decimals) with 18 decimal points for instance

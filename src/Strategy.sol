@@ -53,7 +53,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     bytes4 private immutable unwrappedToWrappedSelector;
     bool private immutable uniswapAsset0Weth1;
 
-    uint96 public minAjnaToAuction = 1000e18; // 1000 ajna
+    uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
     uint16 public slippageAllowedBps = 50; // 0.50%

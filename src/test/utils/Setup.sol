@@ -158,12 +158,16 @@ contract Setup is ExtendedTest, IEvents {
     }
 
     function supplyQuote(uint256 _amount, address _ajnaPool) public {
+        supplyQuote(_amount, _ajnaPool, 4130);
+    }
+
+    function supplyQuote(uint256 _amount, address _ajnaPool, uint256 _bucketIndex) public {
         ERC20 WETH = ERC20(tokenAddrs["WETH"]);
         airdrop(WETH, ajnaDepositor, _amount);
         vm.prank(ajnaDepositor);
         WETH.approve(_ajnaPool, _amount);
         vm.prank(ajnaDepositor);
-        IERC20Pool(_ajnaPool).addQuoteToken(_amount, 4130, type(uint256).max);
+        IERC20Pool(_ajnaPool).addQuoteToken(_amount, _bucketIndex, type(uint256).max);
     }
 
     function totalIdle(IStrategyInterface _strategy) public view returns (uint256) {

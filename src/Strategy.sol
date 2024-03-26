@@ -13,7 +13,7 @@ import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
 import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
 import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
-import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
+//import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
@@ -28,6 +28,10 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 
 // import "forge-std/console.sol"; // TODO: delete
 
+// TODO:
+//  - test shutdown scenarios
+//  - extra oh shits?
+
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
@@ -35,8 +39,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         IAccountFactory(0xF7B75183A2829843dB06266c114297dfbFaeE2b6);
     AjnaProxyActions private constant SUMMERFI_AJNA_PROXY_ACTIONS =
         AjnaProxyActions(0x3637DF43F938b05A71bb828f13D9f14498E6883c);
-    PoolInfoUtils private constant POOL_INFO_UTILS =
-        PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
+    //PoolInfoUtils private constant POOL_INFO_UTILS =
+    //    PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
     IAjnaRedeemer private constant SUMMERFI_REWARDS =
         IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
     IUniswapV3Factory private constant UNISWAP_FACTORY =
@@ -56,7 +60,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
-    uint16 public slippageAllowedBps = 50; // 0.50%
+    uint16 public slippageAllowedBps = 100; // 0.50% TODO: set correctly
     uint64 public maxTendBasefee = 30e9; // 30 gwei
     uint256 public depositLimit;
 
@@ -489,8 +493,26 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *
      */
     function _emergencyWithdraw(uint256 _amount) internal override {
+        (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
+        uint256 _price = _getAssetPerWeth();
+        uint256 _positionValue = _calculateNetPosition(
+            _debt,
+            _collateral,
+            _price
+        );
+
+        LTVConfig memory _ltvs = ltvs;
+
+        _leverDown(_debt, _collateral, _amount, _ltvs, _price);
+
+        (_debt, _collateral, , ) = _positionInfo();
+        require(
+            _calculateLTV(_debt, _collateral, _price) <
+                _ltvs.targetLTV + _ltvs.minAdjustThreshold,
+            "!ltv"
+        ); // dev: ltv in target
         // TODO: implement better?
-        _freeFunds(_amount);
+        //_freeFunds(_amount);
         //(uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         //_swapAndLeverDown(_debt, _amount, true, _getAssetPerWeth());
     }
@@ -629,7 +651,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold)
         ) {
             _leverDown(_debt, _collateral, 0, _ltvs, _assetPerWeth);
-        } else if (_currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold) {
+        } else if (_currentLtv + _ltvs.minAdjustThreshold <= _ltvs.targetLTV) {
             _leverUp(_debt, _collateral, _idle, _ltvs, _assetPerWeth);
         } else {
             return; // bail out if we are doing nothing
@@ -739,7 +761,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         }
 
         bool _closePosition = _repaymentAmount == _debt &&
-            (_assetToFree == 0 || _assetToFree >= _totalDebt());
+            (_assetToFree == 0 || _assetToFree >= _deployedAssets());
 
         _swapAndLeverDown(
             _repaymentAmount,
@@ -912,7 +934,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @notice Returns the strategy assets which are held as loose asset
      *  @return . The strategy's loose asset
      */
-    function _totalIdle() public view returns (uint256) {
+    function _totalIdle() internal view returns (uint256) {
         return asset.balanceOf(address(this));
     }
 
@@ -920,10 +942,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @notice Returns the strategy assets which are not idle
      *  @return . The strategy's total debt
      */
-    function _totalDebt() public view returns (uint256) {
+    function _deployedAssets() internal view returns (uint256) {
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
         uint256 _idle = _totalIdle();
-        if (_idle > _totalAssets) return 0;
+        if (_idle >= _totalAssets) return 0;
         return _totalAssets - _idle;
     }
 

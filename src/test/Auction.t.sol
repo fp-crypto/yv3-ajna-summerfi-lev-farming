@@ -7,7 +7,7 @@ import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 import {Auction, AuctionFactory} from "@periphery/Auctions/AuctionFactory.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract OperationTest is Setup {
+contract AuctionTest is Setup {
     Auction public auction;
     bytes32 public auctionId;
 

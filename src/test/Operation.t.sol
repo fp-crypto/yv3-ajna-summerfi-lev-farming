@@ -7,6 +7,8 @@ import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract OperationTest is Setup {
+    using Helpers for IStrategyInterface;
+
     uint256 public constant REPORTING_PERIOD = 60 days;
 
     function setUp() public virtual override {
@@ -269,5 +271,56 @@ contract OperationTest is Setup {
         Helpers.logStrategyInfo(strategy);
         checkLTV(false);
         checkStrategyTotals(strategy, _amount, _amount, 0);
+    }
+
+    function test_ltvToZero(uint64 _startingLtv) public {
+        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
+        uint64 _endingLtv = 0; 
+
+        vm.assume(
+            Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_endingLtv)) >
+                strategy.ltvs().minAdjustThreshold
+        ); // change must be more than the minimum adjustment threshold
+
+        uint256 _amount = 20e18;
+
+        IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
+        _newLtvConfig.targetLTV = _startingLtv;
+        vm.prank(management);
+        strategy.setLtvConfig(_newLtvConfig);
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, 0, _amount);
+        assertEq(strategy.estimatedTotalAssets(), _amount, "!eta");
+
+        vm.prank(keeper);
+        strategy.tend();
+        Helpers.logStrategyInfo(strategy);
+        checkLTV(false);
+        checkStrategyTotals(strategy, _amount, _amount, 0);
+
+        // Lose money
+        skip(1 days);
+
+        _newLtvConfig.targetLTV = _endingLtv;
+        vm.prank(management);
+        strategy.setLtvConfig(_newLtvConfig);
+
+        // Tend to new LTV
+        vm.prank(keeper);
+        strategy.tend();
+        Helpers.logStrategyInfo(strategy);
+        checkLTV(false);
+        assertEq(strategy.totalIdle(), strategy.estimatedTotalAssetsNoSlippage());
+ 
+        // allow loss
+        vm.prank(management);
+        strategy.setDoHealthCheck(false);   
+        vm.prank(keeper);
+        strategy.report();
+        assertEq(strategy.totalIdle(), strategy.totalAssets());
     }
 }

@@ -14,7 +14,7 @@ library Helpers {
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
     uint256 internal constant MAX_BPS = 10_000;
     uint256 internal constant ONE_WAD = 1e18;
-    uint256 internal constant LST_YIELD_PER_YEAR_BPS = 600;
+    uint256 internal constant LST_YIELD_PER_YEAR_BPS = 1_000;
     uint256 internal constant MAX_SWAP_AMOUNT = 100_000e18;
 
     address internal constant RANDO = address(3287043278);

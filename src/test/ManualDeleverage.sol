@@ -6,7 +6,7 @@ import "./utils/Helpers.sol";
 import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract OperationTest is Setup {
+contract ManualDeleverageTest is Setup {
     using Helpers for IStrategyInterface;
 
     function setUp() public virtual override {

@@ -77,4 +77,16 @@ interface IStrategyInterface is IBaseHealthCheck {
         uint64 _targetLTV,
         bool _force
     ) external;
+
+    function manualRepayWithdraw(
+        uint256 _debtAmount,
+        uint256 _collateralAmount,
+        bool _stamp
+    ) external;
+
+    function manualSwap(
+        uint256 _amountIn,
+        uint64 _minOut,
+        bool _assetForWeth
+    ) external;
 }

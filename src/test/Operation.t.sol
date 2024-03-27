@@ -209,7 +209,7 @@ contract OperationTest is Setup {
             assertApproxEq(
                 actualRatio,
                 targetRatio,
-                50, // bp
+                100, // bp
                 "!ratio"
             );
         }

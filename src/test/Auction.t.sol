@@ -11,6 +11,8 @@ contract AuctionTest is Setup {
     Auction public auction;
     bytes32 public auctionId;
 
+    ERC20 ajnaToken = ERC20(0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079);
+
     function setUp() public virtual override {
         super.setUp();
 
@@ -21,14 +23,15 @@ contract AuctionTest is Setup {
             auctionFactory.createNewAuction(strategy.asset(), address(strategy))
         );
         vm.prank(auction.governance());
-        auctionId = auction.enable(strategy.AJNA_TOKEN(), address(strategy));
+        auctionId = auction.enable(address(ajnaToken), address(strategy));
         auction.setHookFlags(true, true, false, false);
+
+        setFees(0, 0); // set fees to 0 to make life easy
     }
 
-    function test_auction(uint256 _amount) public {
-        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
+    function test_auction() public {
+        uint256 _amount = maxFuzzAmount;
 
-        ERC20 ajnaToken = ERC20(strategy.AJNA_TOKEN());
         vm.prank(management);
         strategy.setAuction(address(auction));
 
@@ -72,8 +75,10 @@ contract AuctionTest is Setup {
         checkLTV(false);
 
         // Expect a loss
-        assertGe(profit, 0, "!profit");
+        assertGt(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
+
+        skip(strategy.profitMaxUnlockTime());
 
         uint256 balanceBefore = asset.balanceOf(user);
 

@@ -78,7 +78,7 @@ library Helpers {
         ISwapRouter router = ISwapRouter(
             0xE592427A0AEce92De3Edee1F18E0157C05861564
         );
-        address weth = strategy.WETH();
+        address weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
         address asset = strategy.asset();
 
         (, bytes memory data) = address(asset).staticcall(

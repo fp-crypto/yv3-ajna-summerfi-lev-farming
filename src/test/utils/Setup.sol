@@ -237,16 +237,16 @@ contract Setup is ExtendedTest, IEvents {
         if (canBeZero && strategy.currentLTV() == 0) return;
         if (onlyCheckTooHigh) {
             assertLe(
-                targetLTV,
-                strategy.ltvs().targetLTV + strategy.ltvs().minAdjustThreshold,
-                "!checkLtv"
+                strategy.currentLTV(),
+                targetLTV + strategy.ltvs().minAdjustThreshold,
+                "!LTV too high"
             );
         } else {
             assertApproxEq(
+                strategy.currentLTV(),
                 targetLTV,
-                strategy.ltvs().targetLTV,
                 strategy.ltvs().minAdjustThreshold,
-                "!checkLtv"
+                "!LTV not target"
             );
         }
     }

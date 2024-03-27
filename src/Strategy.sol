@@ -29,7 +29,6 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 // import "forge-std/console.sol"; // TODO: delete
 
 // TODO:
-//  - test shutdown scenarios
 //  - extra oh shits?
 
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
@@ -46,8 +45,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     IUniswapV3Factory private constant UNISWAP_FACTORY =
         IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
 
-    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address public constant AJNA_TOKEN =
+    address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address private constant AJNA_TOKEN =
         0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079;
 
     IAccount public immutable summerfiAccount;
@@ -298,13 +297,14 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _price
         );
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
-        if (_amount != _totalAssets && _positionValue < _totalAssets) {
+        uint256 _deployed = _deployedAssets(_totalAssets);
+        if (_amount != _deployed && _positionValue < _totalAssets) {
             _amount = (_amount * _positionValue) / _totalAssets;
         }
 
         LTVConfig memory _ltvs = ltvs;
 
-        _leverDown(_debt, _collateral, _amount, _ltvs, _price);
+        _leverDown(_debt, _collateral, _amount, _ltvs, _price, _deployed);
 
         (_debt, _collateral, , ) = _positionInfo();
         require(
@@ -495,15 +495,17 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     function _emergencyWithdraw(uint256 _amount) internal override {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         uint256 _price = _getAssetPerWeth();
-        uint256 _positionValue = _calculateNetPosition(
-            _debt,
-            _collateral,
-            _price
-        );
 
         LTVConfig memory _ltvs = ltvs;
 
-        _leverDown(_debt, _collateral, _amount, _ltvs, _price);
+        _leverDown(
+            _debt,
+            _collateral,
+            _amount,
+            _ltvs,
+            _price,
+            _deployedAssets()
+        );
 
         (_debt, _collateral, , ) = _positionInfo();
         require(
@@ -549,9 +551,16 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
 
         LTVConfig memory _ltvs = ltvs;
         require(_force || _targetLTV <= ltvs.targetLTV); // dev: _targetLTV too high
-        ltvs.targetLTV = _targetLTV;
+        _ltvs.targetLTV = _targetLTV;
 
-        _leverDown(_debt, _collateral, _toLoose, _ltvs, _price);
+        _leverDown(
+            _debt,
+            _collateral,
+            _toLoose,
+            _ltvs,
+            _price,
+            _deployedAssets()
+        );
 
         (_debt, _collateral, , ) = _positionInfo();
         require(
@@ -571,7 +580,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      */
     function manualRepayWithdraw(
         uint256 _debtAmount,
-        uint64 _collateralAmount,
+        uint256 _collateralAmount,
         bool _stamp
     ) external onlyEmergencyAuthorized {
         _repayWithdraw(_debtAmount, _collateralAmount, _stamp);
@@ -591,7 +600,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     ) external onlyEmergencyAuthorized {
         bool zeroForOne = uniswapAsset0Weth1 ? _assetForWeth : !_assetForWeth;
         bytes memory _data = abi.encode(
-            LeverData(LeverAction.ManualSwap, uint256(0), 0)
+            LeverData(LeverAction.ManualSwap, 0, 0, 0)
         );
 
         (int256 amount0, int256 amount1) = uniswapPool.swap(
@@ -650,7 +659,14 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             (_wethPerAsset <= _thresholdPrice ||
                 _currentLtv >= _ltvs.targetLTV + _ltvs.minAdjustThreshold)
         ) {
-            _leverDown(_debt, _collateral, 0, _ltvs, _assetPerWeth);
+            _leverDown(
+                _debt,
+                _collateral,
+                0,
+                _ltvs,
+                _assetPerWeth,
+                _deployedAssets()
+            );
         } else if (_currentLtv + _ltvs.minAdjustThreshold <= _ltvs.targetLTV) {
             _leverUp(_debt, _collateral, _idle, _ltvs, _assetPerWeth);
         } else {
@@ -677,6 +693,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         LeverAction action;
         uint256 assetToFree;
         uint256 assetPerWeth;
+        uint256 totalCollateral;
     }
 
     /**
@@ -724,7 +741,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _collateral,
         uint256 _assetToFree,
         LTVConfig memory _ltvs,
-        uint256 _assetPerWeth
+        uint256 _assetPerWeth,
+        uint256 _deployedAssets
     ) internal {
         uint256 _supply = _calculateNetPosition(
             _debt,
@@ -743,13 +761,12 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             if (_targetBorrow < _minLoanSize()) {
                 _targetBorrow = 0;
             }
+        } else {
+            _assetToFree = _supply;
         }
 
         if (_debt <= _targetBorrow) {
             if (_assetToFree > DUST_THRESHOLD) {
-                if (_assetToFree > _collateral) {
-                    _assetToFree = _collateral;
-                }
                 _repayWithdraw(0, _assetToFree, false);
             }
             return;
@@ -761,13 +778,16 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         }
 
         bool _closePosition = _repaymentAmount == _debt &&
-            (_assetToFree == 0 || _assetToFree >= _deployedAssets());
+            (_assetToFree == 0 ||
+                _assetToFree == _supply ||
+                _assetToFree >= _deployedAssets);
 
         _swapAndLeverDown(
             _repaymentAmount,
             _assetToFree,
             _closePosition,
-            _assetPerWeth
+            _assetPerWeth,
+            _collateral
         );
     }
 
@@ -781,7 +801,12 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         bool zeroForOne = !uniswapAsset0Weth1;
 
         bytes memory _data = abi.encode(
-            LeverData(LeverAction.LeverUp, uint256(0), _assetPerWeth)
+            LeverData(
+                LeverAction.LeverUp,
+                uint256(0),
+                _assetPerWeth,
+                uint256(0)
+            )
         );
 
         /* (int256 amount0, int256 amount1) = */
@@ -802,7 +827,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _repaymentAmount,
         uint256 _assetToLoose,
         bool _close,
-        uint256 _assetPerWeth
+        uint256 _assetPerWeth,
+        uint256 _totalCollateral
     ) private {
         bool zeroForOne = uniswapAsset0Weth1;
 
@@ -810,7 +836,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             LeverData(
                 _close ? LeverAction.ClosePosition : LeverAction.LeverDown,
                 _assetToLoose,
-                _assetPerWeth
+                _assetPerWeth,
+                _totalCollateral
             )
         );
 
@@ -826,9 +853,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _data
         );
 
-        (uint256 _assetIn, uint256 _wethOut) = zeroForOne
-            ? (uint256(amount0Delta), uint256(-amount1Delta))
-            : (uint256(amount1Delta), uint256(-amount0Delta));
+        uint256 _wethOut = uint256(zeroForOne ? -amount1Delta : -amount0Delta);
 
         // it's technically possible to not receive the full output amount
         // require this possibility away
@@ -904,7 +929,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             if (_leverData.action == LeverAction.LeverDown) {
                 _repayWithdraw(
                     _amountReceived,
-                    _amountToPay + _leverData.assetToFree,
+                    Math.min(
+                        _amountToPay + _leverData.assetToFree,
+                        _leverData.totalCollateral
+                    ),
                     false
                 );
             } else if (_leverData.action == LeverAction.ClosePosition) {
@@ -913,7 +941,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             }
             asset.transfer(msg.sender, _amountToPay);
         } else if (_leverData.action == LeverAction.ManualSwap) {
-            require(_isExactInput); // dev: WTF
+            //require(_isExactInput, "!wtf"); // dev: WTF
 
             if (
                 (_amount0Delta > 0 && uniswapAsset0Weth1) ||
@@ -938,12 +966,19 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         return asset.balanceOf(address(this));
     }
 
+    function _deployedAssets() internal view returns (uint256) {
+        return _deployedAssets(TokenizedStrategy.totalAssets());
+    }
+
     /**
      *  @notice Returns the strategy assets which are not idle
      *  @return . The strategy's total debt
      */
-    function _deployedAssets() internal view returns (uint256) {
-        uint256 _totalAssets = TokenizedStrategy.totalAssets();
+    function _deployedAssets(uint256 _totalAssets)
+        internal
+        view
+        returns (uint256)
+    {
         uint256 _idle = _totalIdle();
         if (_idle >= _totalAssets) return 0;
         return _totalAssets - _idle;
@@ -1164,7 +1199,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     function _minLoanSize() internal view returns (uint256 _minDebtAmount) {
         IERC20Pool _ajnaPool = ajnaPool;
         (uint256 _poolDebt, , , ) = _ajnaPool.debtInfo();
-        (, , uint256 _noOfLoans) = ajnaPool.loansInfo();
+        (, , uint256 _noOfLoans) = _ajnaPool.loansInfo();
 
         if (_noOfLoans != 0) {
             // minimum debt is 10% of the average loan size

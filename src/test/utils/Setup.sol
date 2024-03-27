@@ -5,6 +5,7 @@ import "forge-std/console.sol";
 import {ExtendedTest} from "./ExtendedTest.sol";
 
 import {Strategy, ERC20} from "../../Strategy.sol";
+import {StrategyFactory} from "../../StrategyFactory.sol";
 import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 
 // Inherit the events so they can be checked if desired.
@@ -35,7 +36,7 @@ contract Setup is ExtendedTest, IEvents {
     // Addresses for different roles we will use repeatedly.
     address public user = address(10);
     address public keeper = address(4);
-    address public management = address(1);
+    address public management = address(0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7);
     address public performanceFeeRecipient = address(3);
     address public ajnaDepositor = address(42069);
 
@@ -81,10 +82,12 @@ contract Setup is ExtendedTest, IEvents {
     }
 
     function setUpStrategy() public returns (address) {
+        StrategyFactory _strategyFactory = new StrategyFactory(keeper);
+
         // we save the strategy as a IStrategyInterface to give it the needed interface
         IStrategyInterface _strategy = IStrategyInterface(
             address(
-                new Strategy(
+                _strategyFactory.newStrategy(
                     address(asset),
                     "Tokenized Strategy",
                     getAjnaPoolForAsset(address(asset)),
@@ -96,6 +99,8 @@ contract Setup is ExtendedTest, IEvents {
             )
         );
 
+        vm.startPrank(management);
+        _strategy.acceptManagement();
         // set keeper
         _strategy.setKeeper(keeper);
         // set treasury
@@ -108,9 +113,7 @@ contract Setup is ExtendedTest, IEvents {
         _ltvConfig.targetLTV = 0.85e18;
         // set target ltv
         _strategy.setLtvConfig(_ltvConfig);
-
-        vm.prank(management);
-        _strategy.acceptManagement();
+        vm.stopPrank();
 
         supplyQuote(maxFuzzAmount * 20, getAjnaPoolForAsset(address(asset)));
 

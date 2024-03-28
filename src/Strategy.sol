@@ -156,7 +156,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      */
     function estimatedTotalAssets() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        uint256 _idle = _totalIdle();
+        uint256 _idle = _looseAssets();
         return
             _calculateNetPositionWithMaxSlippage(
                 _debt,
@@ -174,7 +174,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     function estimatedTotalAssetsNoSlippage() external view returns (uint256) {
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         // increase debt by max slippage, since we must swap all debt to exit our position
-        uint256 _idle = _totalIdle();
+        uint256 _idle = _looseAssets();
         return
             _calculateNetPosition(_debt, _collateral, _getAssetPerWeth()) +
             _idle;
@@ -341,7 +341,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         override
         returns (uint256 _totalAssets)
     {
-        _adjustPosition(_totalIdle());
+        uint256 _idle = _looseAssets();
+        _adjustPosition(_idle);
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
             _calculateNetPositionWithMaxSlippage(
@@ -349,7 +350,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _collateral,
                 _getAssetPerWeth()
             ) +
-            _totalIdle();
+            _idle;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -367,7 +368,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *
      * This can be used to harvest and compound rewards, deposit idle funds,
      * perform needed position maintenance or anything else that doesn't need
-     * a full report for.
+     * ssda full report for.
      *
      *   EX: A strategy that can not deposit funds without getting
      *       sandwiched can use the tend when a certain threshold
@@ -513,10 +514,6 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _ltvs.targetLTV + _ltvs.minAdjustThreshold,
             "!ltv"
         ); // dev: ltv in target
-        // TODO: implement better?
-        //_freeFunds(_amount);
-        //(uint256 _debt, uint256 _collateral, , ) = _positionInfo();
-        //_swapAndLeverDown(_debt, _amount, true, _getAssetPerWeth());
     }
 
     function _auctionKicked(address _token)
@@ -895,7 +892,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _leverData.assetPerWeth) / ONE_WAD;
             require(_amountReceived >= _leastAssetReceived, "!slippage"); // dev: too much slippage
 
-            uint256 _collateralToAdd = _totalIdle();
+            uint256 _collateralToAdd = _looseAssets();
             if (!positionOpen) {
                 positionOpen = true;
                 _openPosition(_amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
@@ -962,10 +959,14 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @notice Returns the strategy assets which are held as loose asset
      *  @return . The strategy's loose asset
      */
-    function _totalIdle() internal view returns (uint256) {
+    function _looseAssets() internal view returns (uint256) {
         return asset.balanceOf(address(this));
     }
 
+    /**
+     *  @notice Returns the strategy assets which are not idle
+     *  @return . The strategy's total debt
+     */
     function _deployedAssets() internal view returns (uint256) {
         return _deployedAssets(TokenizedStrategy.totalAssets());
     }
@@ -979,7 +980,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         view
         returns (uint256)
     {
-        uint256 _idle = _totalIdle();
+        uint256 _idle = _looseAssets();
         if (_idle >= _totalAssets) return 0;
         return _totalAssets - _idle;
     }

@@ -40,7 +40,7 @@ contract TendTriggerTest is Setup {
 
         // Skip some time
         skip(1 days);
-        Helpers.generatePaperProfitOrLoss(vm, strategy, -125);
+        Helpers.generatePaperProfitOrLoss(vm, strategy, -200);
         Helpers.logStrategyInfo(strategy);
 
         // False due to fee too high
@@ -54,7 +54,7 @@ contract TendTriggerTest is Setup {
         assertTrue(trigger);
 
         skip(1 days);
-        Helpers.generatePaperProfitOrLoss(vm, strategy, -125);
+        Helpers.generatePaperProfitOrLoss(vm, strategy, -200);
         Helpers.logStrategyInfo(strategy);
 
         // True because LTV is above emergency threshold
@@ -78,7 +78,7 @@ contract TendTriggerTest is Setup {
 
         // Skip some time
         skip(1 days);
-        Helpers.generatePaperProfitOrLoss(vm, strategy, 125);
+        Helpers.generatePaperProfitOrLoss(vm, strategy, 200);
         Helpers.logStrategyInfo(strategy);
 
         // LTV should be below min threshold

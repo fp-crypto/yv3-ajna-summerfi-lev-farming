@@ -28,26 +28,23 @@ import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.
 
 // import "forge-std/console.sol"; // TODO: delete
 
-// TODO:
-//  - extra oh shits?
-
-contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
+contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback /*, AuctionSwapper */ {
     using SafeERC20 for ERC20;
 
     IAccountFactory private constant SUMMERFI_ACCOUNT_FACTORY =
-        IAccountFactory(0xF7B75183A2829843dB06266c114297dfbFaeE2b6);
+        IAccountFactory(0x881CD31218f45a75F8ad543A3e1Af087f3986Ae0);
     AjnaProxyActions private constant SUMMERFI_AJNA_PROXY_ACTIONS =
-        AjnaProxyActions(0x3637DF43F938b05A71bb828f13D9f14498E6883c);
+        AjnaProxyActions(0x099708408aDb18F6D49013c88F3b1Bb514cC616F);
     //PoolInfoUtils private constant POOL_INFO_UTILS =
     //    PoolInfoUtils(0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE);
-    IAjnaRedeemer private constant SUMMERFI_REWARDS =
-        IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
+    //IAjnaRedeemer private constant SUMMERFI_REWARDS =
+    //    IAjnaRedeemer(0xf309EE5603bF05E5614dB930E4EAB661662aCeE6);
     IUniswapV3Factory private constant UNISWAP_FACTORY =
-        IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
+        IUniswapV3Factory(0x33128a8fC17869897dcE68Ed026d694621f6FDfD);
 
-    address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address private constant AJNA_TOKEN =
-        0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079;
+    address private constant WETH = 0x4200000000000000000000000000000000000006;
+    //address private constant AJNA_TOKEN =
+    //    0x9a96ec9B57Fb64FbC60B423d1f4da7691Bd35079;
 
     IAccount public immutable summerfiAccount;
     IERC20Pool public immutable ajnaPool;
@@ -59,8 +56,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
-    uint16 public slippageAllowedBps = 100; // 0.50% TODO: set correctly
-    uint64 public maxTendBasefee = 30e9; // 30 gwei
+    uint16 public slippageAllowedBps = 75; // 0.75%
+    uint64 public maxTendBasefee = 5e9; // 5 gwei
     uint256 public depositLimit;
 
     struct LTVConfig {
@@ -113,7 +110,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ltvs = _ltvs;
 
         _setUniswapFee(_uniswapFee);
-        _enableAuction(AJNA_TOKEN, address(asset));
+        //_enableAuction(AJNA_TOKEN, address(asset));
     }
 
     /*******************************************
@@ -230,19 +227,19 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         maxTendBasefee = _maxTendBasefee;
     }
 
-    function setMinAjnaToAuction(uint96 _minAjnaToAuction)
-        external
-        onlyManagement
-    {
-        minAjnaToAuction = _minAjnaToAuction;
-    }
+    //function setMinAjnaToAuction(uint96 _minAjnaToAuction)
+    //    external
+    //    onlyManagement
+    //{
+    //    minAjnaToAuction = _minAjnaToAuction;
+    //}
 
-    function setAuction(address _auction) external onlyEmergencyAuthorized {
-        if (_auction != address(0)) {
-            require(Auction(_auction).want() == address(asset)); // dev: wrong want
-        }
-        auction = _auction;
-    }
+    //function setAuction(address _auction) external onlyEmergencyAuthorized {
+    //    if (_auction != address(0)) {
+    //        require(Auction(_auction).want() == address(asset)); // dev: wrong want
+    //    }
+    //    auction = _auction;
+    //}
 
     /***********************************************
      *      BASE STRATEGY OVERRIDE FUNCTIONS       *
@@ -516,16 +513,16 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ); // dev: ltv in target
     }
 
-    function _auctionKicked(address _token)
-        internal
-        virtual
-        override
-        returns (uint256 _kicked)
-    {
-        require(_token == AJNA_TOKEN); // dev: only sell ajna
-        _kicked = super._auctionKicked(_token);
-        require(_kicked >= minAjnaToAuction); // dev: too little
-    }
+    //function _auctionKicked(address _token)
+    //    internal
+    //    virtual
+    //    override
+    //    returns (uint256 _kicked)
+    //{
+    //    require(_token == AJNA_TOKEN); // dev: only sell ajna
+    //    _kicked = super._auctionKicked(_token);
+    //    require(_kicked >= minAjnaToAuction); // dev: too little
+    //}
 
     /**************************************************
      *      EXTERNAL POSTION MANAGMENT FUNCTIONS      *
@@ -615,22 +612,22 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         require(uint256(zeroForOne ? amount1 : amount0) >= _minOut); // dev: !minOut
     }
 
-    /**
-     * @notice Claims summerfi ajna rewards
-     *
-     * Unguarded because there is no risk claiming
-     *
-     * @param _weeks An array of week numbers for which to claim rewards.
-     * @param _amounts An array of reward amounts to claim.
-     * @param _proofs An array of Merkle proofs, one for each corresponding week and amount given.
-     */
-    function redeemSummerAjnaRewards(
-        uint256[] calldata _weeks,
-        uint256[] calldata _amounts,
-        bytes32[][] calldata _proofs
-    ) external {
-        SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
-    }
+    ///**
+    // * @notice Claims summerfi ajna rewards
+    // *
+    // * Unguarded because there is no risk claiming
+    // *
+    // * @param _weeks An array of week numbers for which to claim rewards.
+    // * @param _amounts An array of reward amounts to claim.
+    // * @param _proofs An array of Merkle proofs, one for each corresponding week and amount given.
+    // */
+    //function redeemSummerAjnaRewards(
+    //    uint256[] calldata _weeks,
+    //    uint256[] calldata _amounts,
+    //    bytes32[][] calldata _proofs
+    //) external {
+    //    SUMMERFI_REWARDS.claimMultiple(_weeks, _amounts, _proofs);
+    //}
 
     /**************************************************
      *      INTERNAL POSTION MANAGMENT FUNCTIONS      *

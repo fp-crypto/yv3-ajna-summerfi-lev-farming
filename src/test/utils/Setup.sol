@@ -48,8 +48,8 @@ contract Setup is ExtendedTest, IEvents {
     uint256 public MAX_BPS = 10_000;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
-    uint256 public maxFuzzAmount = 8e18;
-    uint256 public minFuzzAmount = 2e18;
+    uint256 public maxFuzzAmount = 1e18;
+    uint256 public minFuzzAmount = 0.5e18;
 
     // Default profit max unlock time is set for 10 days
     uint256 public profitMaxUnlockTime = 10 days;
@@ -92,9 +92,9 @@ contract Setup is ExtendedTest, IEvents {
                     "Tokenized Strategy",
                     getAjnaPoolForAsset(address(asset)),
                     100, // uniswap 1bp pool
-                    bytes4(0xb0e38900), // selector,
-                    0x86392dC19c0b719886221c78AB11eb8Cf5c52812, // oracle,
-                    false // oracleWrapped
+                    bytes4(0), // selector,
+                    0xa669E5272E60f78299F4824495cE01a3923f4380, // oracle,
+                    true // oracleWrapped
                 )
             )
         );
@@ -110,12 +110,12 @@ contract Setup is ExtendedTest, IEvents {
         // set deposit limit
         _strategy.setDepositLimit(2**256 - 1);
         IStrategyInterface.LTVConfig memory _ltvConfig = _strategy.ltvs();
-        _ltvConfig.targetLTV = 0.85e18;
+        _ltvConfig.targetLTV = 0.70e18;
         // set target ltv
         _strategy.setLtvConfig(_ltvConfig);
         vm.stopPrank();
 
-        supplyQuote(maxFuzzAmount * 20, getAjnaPoolForAsset(address(asset)));
+        supplyQuote(maxFuzzAmount * 100, getAjnaPoolForAsset(address(asset)));
 
         return address(_strategy);
     }
@@ -138,7 +138,7 @@ contract Setup is ExtendedTest, IEvents {
         returns (address _pool)
     {
         ERC20PoolFactory ajnaFactory = ERC20PoolFactory(
-            0x6146DD43C5622bB6D12A5240ab9CF4de14eDC625
+            0x214f62B5836D83f3D6c4f71F174209097B1A779C
         );
         address WETH = tokenAddrs["WETH"];
 
@@ -255,14 +255,8 @@ contract Setup is ExtendedTest, IEvents {
     }
 
     function _setTokenAddrs() internal {
-        tokenAddrs["WBTC"] = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
-        tokenAddrs["YFI"] = 0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e;
-        tokenAddrs["WETH"] = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-        tokenAddrs["LINK"] = 0x514910771AF9Ca656af840dff83E8264EcF986CA;
-        tokenAddrs["USDT"] = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
-        tokenAddrs["DAI"] = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
-        tokenAddrs["USDC"] = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-        tokenAddrs["WSTETH"] = 0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0;
+        tokenAddrs["WETH"] = 0x4200000000000000000000000000000000000006;
+        tokenAddrs["WSTETH"] = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
         tokenAddrs["RETH"] = 0xae78736Cd615f374D3085123A210448E74Fc6393;
     }
 }

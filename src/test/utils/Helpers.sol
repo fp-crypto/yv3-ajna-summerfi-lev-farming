@@ -4,17 +4,35 @@ pragma solidity ^0.8.18;
 import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 import {IChainlinkAggregator} from "../../interfaces/chainlink/IChainlinkAggregator.sol";
 import {Vm} from "forge-std/Test.sol";
-import {ISwapRouter} from "@periphery/interfaces/Uniswap/V3/ISwapRouter.sol";
 import {ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IWETH} from "../../interfaces/IWeth.sol";
 import "forge-std/console.sol";
 
+interface ISwapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    /// @notice Swaps `amountIn` of one token for as much as possible of another token
+    /// @dev Setting `amountIn` to 0 will cause the contract to look up its own balance,
+    /// and swap the entire amount, enabling contracts to send tokens before calling this function.
+    /// @param params The parameters necessary for the swap, encoded as `ExactInputSingleParams` in calldata
+    /// @return amountOut The amount of the received token
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
+}
+
 library Helpers {
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
     uint256 internal constant MAX_BPS = 10_000;
     uint256 internal constant ONE_WAD = 1e18;
-    uint256 internal constant LST_YIELD_PER_YEAR_BPS = 1_000;
+    uint256 internal constant LST_YIELD_PER_YEAR_BPS = 500;
     uint256 internal constant MAX_SWAP_AMOUNT = 100_000e18;
 
     address internal constant RANDO = address(3287043278);
@@ -76,15 +94,15 @@ library Helpers {
         uint256 _lstValue
     ) internal {
         ISwapRouter router = ISwapRouter(
-            0xE592427A0AEce92De3Edee1F18E0157C05861564
+            0x2626664c2603336E57B271c5C0b26F421741e481
         );
-        address weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+        address weth = 0x4200000000000000000000000000000000000006;
         address asset = strategy.asset();
 
-        (, bytes memory data) = address(asset).staticcall(
-            abi.encodeWithSelector(bytes4(0xb0e38900), (ONE_WAD**2) / _lstValue)
-        );
-        _lstValue = (ONE_WAD**2) / abi.decode(data, (uint256));
+        //(, bytes memory data) = address(asset).staticcall(
+        //    abi.encodeWithSelector(bytes4(0xb0e38900), (ONE_WAD**2) / _lstValue)
+        //);
+        _lstValue = (ONE_WAD**2) / _lstValue;
 
         uint160 sqrtPriceLimitX96 = uint160(
             (Math.sqrt(_lstValue * ONE_WAD) * 2**96) / ONE_WAD
@@ -95,7 +113,6 @@ library Helpers {
                 asset, // tokenOut
                 100, // from-to fee
                 address(this), // recipient
-                block.timestamp, // deadline
                 MAX_SWAP_AMOUNT, // amountIn
                 0, // amountOut
                 sqrtPriceLimitX96 // sqrtPriceLimitX96

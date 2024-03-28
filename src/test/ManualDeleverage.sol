@@ -19,7 +19,7 @@ contract ManualDeleverageTest is Setup {
     {
         vm.prank(management);
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
-        _targetLTV = uint64(bound(_amount, 0, 0.80e18));
+        _targetLTV = uint64(bound(_amount, 0, 0.70e18));
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);
@@ -123,7 +123,7 @@ contract ManualDeleverageTest is Setup {
         uint256 _toLoose
     ) public {
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
-        _targetLTV = uint64(bound(_amount, 0, 0.80e18));
+        _targetLTV = uint64(bound(_amount, 0, 0.7e18));
 
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _amount);

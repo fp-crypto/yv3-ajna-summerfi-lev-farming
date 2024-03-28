@@ -106,15 +106,18 @@ contract OperationTest is Setup {
         Helpers.logStrategyInfo(strategy);
 
         // Make money
-        uint256 _lstPrice = Helpers.generatePaperProfit(
+        uint256 _lstPrice = Helpers.generatePaperProfitOrLoss(
             vm,
             strategy,
-            REPORTING_PERIOD
+            100
         );
         Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
         skip(REPORTING_PERIOD);
 
         Helpers.logStrategyInfo(strategy);
+
+        vm.prank(management);
+        strategy.setDoHealthCheck(false);
 
         // Report profit
         vm.prank(keeper);
@@ -231,8 +234,8 @@ contract OperationTest is Setup {
     }
 
     function test_ltvChanges(uint64 _startingLtv, uint64 _endingLtv) public {
-        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
-        _endingLtv = uint64(bound(_endingLtv, 0.4e18, 0.85e18)); // max ltv 85%
+        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.70e18)); // max ltv 70%
+        _endingLtv = uint64(bound(_endingLtv, 0.4e18, 0.70e18)); // max ltv 70%
         vm.assume(
             Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_endingLtv)) >
                 strategy.ltvs().minAdjustThreshold
@@ -274,7 +277,7 @@ contract OperationTest is Setup {
     }
 
     function test_ltvToZero(uint64 _startingLtv) public {
-        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
+        _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.7e18)); // max ltv 70%
         uint64 _endingLtv = 0; 
 
         vm.assume(

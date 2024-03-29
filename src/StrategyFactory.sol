@@ -10,7 +10,7 @@ contract StrategyFactory {
 
     event NewStrategy(address indexed strategy, address indexed asset);
 
-    address public constant SMS = 0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7;
+    address public constant SMS = 0x01fE3347316b2223961B20689C65eaeA71348e93;
 
     address public keeper;
 

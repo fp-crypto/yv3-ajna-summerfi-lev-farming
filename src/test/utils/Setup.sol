@@ -36,7 +36,7 @@ contract Setup is ExtendedTest, IEvents {
     // Addresses for different roles we will use repeatedly.
     address public user = address(10);
     address public keeper = address(4);
-    address public management = address(0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7);
+    address public management = address(0x01fE3347316b2223961B20689C65eaeA71348e93);
     address public performanceFeeRecipient = address(3);
     address public ajnaDepositor = address(42069);
 

@@ -53,7 +53,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     IERC20Pool public immutable ajnaPool;
     IChainlinkAggregator public immutable chainlinkOracle;
     bool public immutable oracleWrapped;
-    bytes4 private immutable unwrappedToWrappedSelector;
+    bytes4 public immutable unwrappedToWrappedSelector;
     bool private immutable uniswapAsset0Weth1;
 
     uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna

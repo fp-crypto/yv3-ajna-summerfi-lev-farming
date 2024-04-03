@@ -20,7 +20,9 @@ interface IStrategyInterface is IBaseHealthCheck {
 
     function chainlinkOracle() external view returns (address);
 
-    function oracleWrapped() external view returns (address);
+    function unwrappedToWrappedSelector() external view returns (bytes4);
+
+    function oracleWrapped() external view returns (bool);
 
     function maxTendBasefee() external view returns (uint64);
 

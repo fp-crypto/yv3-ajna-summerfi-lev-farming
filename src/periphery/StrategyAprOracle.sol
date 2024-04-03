@@ -81,6 +81,7 @@ contract StrategyAprOracle is AprOracleBase {
 
     function getLstAprFromUniswapTWAP(address _strategy)
         external
+        view
         returns (int256)
     {
         IStrategyInterface _iStrategy = IStrategyInterface(_strategy);

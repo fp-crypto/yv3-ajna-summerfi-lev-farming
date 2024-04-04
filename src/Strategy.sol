@@ -26,11 +26,6 @@ import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
-// import "forge-std/console.sol"; // TODO: delete
-
-// TODO:
-//  - extra oh shits?
-
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
@@ -59,7 +54,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     uint96 public minAjnaToAuction = 1_000e18; // 1000 ajna
     IUniswapV3Pool public uniswapPool;
     bool public positionOpen;
-    uint16 public slippageAllowedBps = 100; // 0.50% TODO: set correctly
+    uint16 public slippageAllowedBps = 50; // 0.50%
     uint64 public maxTendBasefee = 30e9; // 30 gwei
     uint256 public depositLimit;
 

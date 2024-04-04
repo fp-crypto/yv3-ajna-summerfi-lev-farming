@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 import {IChainlinkAggregator} from "../../interfaces/chainlink/IChainlinkAggregator.sol";
+import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {Vm} from "forge-std/Test.sol";
 import {ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -102,16 +103,17 @@ library Helpers {
         //(, bytes memory data) = address(asset).staticcall(
         //    abi.encodeWithSelector(bytes4(0xb0e38900), (ONE_WAD**2) / _lstValue)
         //);
-        _lstValue = (ONE_WAD**2) / _lstValue;
+        //_lstValue = (ONE_WAD**2) / _lstValue;
 
         uint160 sqrtPriceLimitX96 = uint160(
             (Math.sqrt(_lstValue * ONE_WAD) * 2**96) / ONE_WAD
         );
+
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
             .ExactInputSingleParams(
                 weth, // tokenIn
                 asset, // tokenOut
-                100, // from-to fee
+                IUniswapV3Pool(strategy.uniswapPool()).fee(), // from-to fee
                 address(this), // recipient
                 MAX_SWAP_AMOUNT, // amountIn
                 0, // amountOut

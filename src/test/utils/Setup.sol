@@ -58,7 +58,7 @@ contract Setup is ExtendedTest, IEvents {
         _setTokenAddrs();
 
         // Set asset
-        asset = ERC20(tokenAddrs["WSTETH"]);
+        asset = ERC20(tokenAddrs["CBETH"]);
 
         // Set decimals
         decimals = asset.decimals();
@@ -91,9 +91,9 @@ contract Setup is ExtendedTest, IEvents {
                     address(asset),
                     "Tokenized Strategy",
                     getAjnaPoolForAsset(address(asset)),
-                    100, // uniswap 1bp pool
+                    500, // uniswap 1bp pool
                     bytes4(0), // selector,
-                    0xa669E5272E60f78299F4824495cE01a3923f4380, // oracle,
+                    0x806b4Ac04501c29769051e42783cF04dCE41440b, // oracle,
                     true // oracleWrapped
                 )
             )
@@ -110,7 +110,7 @@ contract Setup is ExtendedTest, IEvents {
         // set deposit limit
         _strategy.setDepositLimit(2**256 - 1);
         IStrategyInterface.LTVConfig memory _ltvConfig = _strategy.ltvs();
-        _ltvConfig.targetLTV = 0.70e18;
+        _ltvConfig.targetLTV = 0.85e18;
         // set target ltv
         _strategy.setLtvConfig(_ltvConfig);
         vm.stopPrank();
@@ -257,6 +257,7 @@ contract Setup is ExtendedTest, IEvents {
     function _setTokenAddrs() internal {
         tokenAddrs["WETH"] = 0x4200000000000000000000000000000000000006;
         tokenAddrs["WSTETH"] = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
+        tokenAddrs["CBETH"] = 0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22;
         tokenAddrs["RETH"] = 0xae78736Cd615f374D3085123A210448E74Fc6393;
     }
 }

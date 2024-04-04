@@ -5,6 +5,7 @@ import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 import {IChainlinkAggregator} from "../../interfaces/chainlink/IChainlinkAggregator.sol";
 import {Vm} from "forge-std/Test.sol";
 import {ISwapRouter} from "@periphery/interfaces/Uniswap/V3/ISwapRouter.sol";
+import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IWETH} from "../../interfaces/IWeth.sol";
@@ -93,7 +94,7 @@ library Helpers {
             .ExactInputSingleParams(
                 weth, // tokenIn
                 asset, // tokenOut
-                100, // from-to fee
+                IUniswapV3Pool(strategy.uniswapPool()).fee(), // from-to fee
                 address(this), // recipient
                 block.timestamp, // deadline
                 MAX_SWAP_AMOUNT, // amountIn

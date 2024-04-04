@@ -17,8 +17,8 @@ contract StrategyAprOracle is AprOracleBase {
     uint256 private constant YEAR = 365 days;
     uint256 private constant WAD = 1e18;
 
-    uint64 public lstApr = 0.0325e18;
-    bool public useUniswapTwap;
+    mapping(address => uint64) public lstApr;
+    mapping(address => bool) public useUniswapTwap;
 
     constructor() AprOracleBase("Ajna LST Strategy APR Oracle", msg.sender) {}
 
@@ -48,23 +48,26 @@ contract StrategyAprOracle is AprOracleBase {
         returns (uint256 _apr)
     {
         IStrategyInterface _iStrategy = IStrategyInterface(_strategy);
-        uint256 _targetLTV = _iStrategy.ltvs().targetLTV;
+        address _asset = _iStrategy.asset();
 
         uint256 _lstApr;
-        if (useUniswapTwap) {
+        if (useUniswapTwap[_asset]) {
             int256 _uniswapTwapApr = _getLstAprFromUniswapTWAP(
                 _iStrategy.uniswapPool(),
-                _iStrategy.asset()
+                _asset
             );
             _lstApr = (_uniswapTwapApr >= 0) ? uint256(_uniswapTwapApr) : 0;
         } else {
-            _lstApr = lstApr;
+            _lstApr = lstApr[_asset];
         }
+
+        if (_lstApr == 0) return _apr;
 
         IERC20Pool _ajnaPool = IERC20Pool(_iStrategy.ajnaPool());
 
         (uint256 _ajnaBorrowApr, ) = _ajnaPool.interestRateInfo();
-        uint256 _assets = WAD;
+        uint256 _targetLTV = _iStrategy.ltvs().targetLTV;
+        uint256 _assets = WAD; // 1e18 to make the math easy
         uint256 _collateral = WAD**2 / (WAD - _targetLTV);
         uint256 _debt = (_collateral * _targetLTV) / WAD;
 
@@ -74,8 +77,8 @@ contract StrategyAprOracle is AprOracleBase {
             _extraYield = ((_collateral - _assets) * _lstApr) / WAD;
         }
 
-        if (_assets != 0 && _extraYield > _debtCost) {
-            _apr = ((_extraYield - _debtCost) * WAD) / _assets;
+        if (_extraYield > _debtCost) {
+            _apr = _extraYield - _debtCost;
         }
     }
 
@@ -92,12 +95,12 @@ contract StrategyAprOracle is AprOracleBase {
             );
     }
 
-    function setLstApr(uint64 _lstApr) external onlyGovernance {
-        lstApr = _lstApr;
+    function setLstApr(address _lst, uint64 _lstApr) external onlyGovernance {
+        lstApr[_lst] = _lstApr;
     }
 
-    function setUseUniswapTwap(bool _useUniswapTwap) external onlyGovernance {
-        useUniswapTwap = _useUniswapTwap;
+    function setUseUniswapTwap(address _lst, bool _useUniswapTwap) external onlyGovernance {
+        useUniswapTwap[_lst] = _useUniswapTwap;
     }
 
     function _getLstAprFromUniswapTWAP(address _uniswapPool, address _asset)

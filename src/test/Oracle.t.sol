@@ -12,6 +12,8 @@ contract OracleTest is Setup {
         super.setUp();
         vm.prank(management);
         oracle = new StrategyAprOracle();
+        vm.prank(management);
+        oracle.setLstApr(address(asset), 0.0325e18);
     }
 
     function checkOracle(address _strategy, uint256 _delta) public {
@@ -41,13 +43,14 @@ contract OracleTest is Setup {
         assertEq(currentApr, positiveDebtChangeApr, "positive change");
 
         uint64 _newLstApr = 0.05e18;
+        address _asset = address(asset);
         vm.expectRevert("!governance");
         vm.prank(user);
-        oracle.setLstApr(_newLstApr);
+        oracle.setLstApr(_asset, _newLstApr);
 
         vm.prank(management);
-        oracle.setLstApr(_newLstApr);
-        assertEq(oracle.lstApr(), _newLstApr);
+        oracle.setLstApr(_asset, _newLstApr);
+        assertEq(oracle.lstApr(_asset), _newLstApr);
 
         uint256 higherLstApr = oracle.aprAfterDebtChange(
             _strategy,
@@ -58,8 +61,8 @@ contract OracleTest is Setup {
 
         _newLstApr = 0.02e18;
         vm.prank(management);
-        oracle.setLstApr(_newLstApr);
-        assertEq(oracle.lstApr(), _newLstApr);
+        oracle.setLstApr(_asset, _newLstApr);
+        assertEq(oracle.lstApr(_asset), _newLstApr);
 
         uint256 lowerLstApr = oracle.aprAfterDebtChange(
             _strategy,
@@ -71,11 +74,11 @@ contract OracleTest is Setup {
         bool _useUniswapTwap = true;
         vm.expectRevert("!governance");
         vm.prank(user);
-        oracle.setUseUniswapTwap(_useUniswapTwap);
+        oracle.setUseUniswapTwap(_asset, _useUniswapTwap);
 
         vm.prank(management);
-        oracle.setUseUniswapTwap(_useUniswapTwap);
-        assertEq(oracle.useUniswapTwap(), _useUniswapTwap);
+        oracle.setUseUniswapTwap(_asset, _useUniswapTwap);
+        assertEq(oracle.useUniswapTwap(_asset), _useUniswapTwap);
     }
 
     function test_oracle(uint256 _amount, uint16 _percentChange) public {

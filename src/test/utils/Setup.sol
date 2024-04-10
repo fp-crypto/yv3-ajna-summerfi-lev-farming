@@ -113,6 +113,8 @@ contract Setup is ExtendedTest, IEvents {
         _ltvConfig.targetLTV = 0.85e18;
         // set target ltv
         _strategy.setLtvConfig(_ltvConfig);
+        // set slippage higher for testing
+        _strategy.setSlippageAllowedBps(100);
         vm.stopPrank();
 
         supplyQuote(maxFuzzAmount * 20, getAjnaPoolForAsset(address(asset)));

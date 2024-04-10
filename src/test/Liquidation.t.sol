@@ -25,7 +25,7 @@ contract LiquidationTest is Setup {
         address borrower = strategy.summerfiAccount();
 
         IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
-        _newLtvConfig.targetLTV = 0.914e18;
+        _newLtvConfig.targetLTV = 0.91e18;
         vm.prank(management);
         strategy.setLtvConfig(_newLtvConfig);
 
@@ -65,8 +65,10 @@ contract LiquidationTest is Setup {
         Helpers.logStrategyInfo(strategy);
         vm.prank(management);
         strategy.setDoHealthCheck(false);
-        vm.prank(keeper);
+        vm.startPrank(keeper);
+        vm.expectRevert();
         strategy.report();
+        vm.stopPrank();
         Helpers.logStrategyInfo(strategy);
     }
 
@@ -78,7 +80,7 @@ contract LiquidationTest is Setup {
         address borrower = strategy.summerfiAccount();
 
         IStrategyInterface.LTVConfig memory _newLtvConfig = strategy.ltvs();
-        _newLtvConfig.targetLTV = 0.914e18;
+        _newLtvConfig.targetLTV = 0.91e18;
         vm.prank(management);
         strategy.setLtvConfig(_newLtvConfig);
 

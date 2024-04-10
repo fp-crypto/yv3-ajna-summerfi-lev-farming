@@ -429,7 +429,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         // Tend if ltv is lower than target range
         if (
             _currentLtv != 0 &&
-            _currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold
+            _currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold && 
+            _availableWethBorrow() > DUST_THRESHOLD
         ) {
             return true;
         }
@@ -720,6 +721,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _availableBorrow = _availableWethBorrow();
         if (_availableBorrow < _toBorrow) {
             _toBorrow = _availableBorrow;
+        }
+
+        if (_toBorrow < DUST_THRESHOLD) {
+            return;
         }
 
         _swapAndLeverUp(_toBorrow, _assetPerWeth);

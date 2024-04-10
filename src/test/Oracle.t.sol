@@ -8,12 +8,14 @@ import {StrategyAprOracle} from "../periphery/StrategyAprOracle.sol";
 contract OracleTest is Setup {
     StrategyAprOracle public oracle;
 
+    uint64 initialApr = 0.05e18;
+
     function setUp() public override {
         super.setUp();
         vm.prank(management);
         oracle = new StrategyAprOracle();
         vm.prank(management);
-        oracle.setLstApr(address(asset), 0.0325e18);
+        oracle.setLstApr(address(asset), initialApr);
     }
 
     function checkOracle(address _strategy, uint256 _delta) public {
@@ -42,7 +44,7 @@ contract OracleTest is Setup {
 
         assertEq(currentApr, positiveDebtChangeApr, "positive change");
 
-        uint64 _newLstApr = 0.05e18;
+        uint64 _newLstApr = initialApr + 0.02e18;
         address _asset = address(asset);
         vm.expectRevert("!governance");
         vm.prank(user);
@@ -59,7 +61,7 @@ contract OracleTest is Setup {
 
         assertLt(currentApr, higherLstApr, "higher Apr");
 
-        _newLstApr = 0.02e18;
+        _newLstApr = initialApr - 0.02e18;
         vm.prank(management);
         oracle.setLstApr(_asset, _newLstApr);
         assertEq(oracle.lstApr(_asset), _newLstApr);

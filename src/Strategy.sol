@@ -711,10 +711,6 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _assetPerWeth
         );
 
-        if (_targetBorrow < _minLoanSize()) {
-            return;
-        }
-
         require(_targetBorrow > _debt); // dev: something is very wrong
 
         uint256 _toBorrow = _targetBorrow - _debt;
@@ -723,7 +719,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _toBorrow = _availableBorrow;
         }
 
-        if (_toBorrow < DUST_THRESHOLD) {
+        if (_toBorrow < DUST_THRESHOLD || _debt + _toBorrow < _minLoanSize() ) {
             return;
         }
 

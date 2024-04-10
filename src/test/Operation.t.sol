@@ -230,16 +230,28 @@ contract OperationTest is Setup {
         }
     }
 
-    function test_depositWhenPositionIsOpen(uint256 _amount) public {
-        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
+    function test_depositWhenPositionIsOpen(
+        uint256 _initialAmount,
+        uint256 _subsequentAmount
+    ) public {
+        _initialAmount = bound(
+            _initialAmount,
+            minFuzzAmount,
+            maxFuzzAmount - 1e9
+        );
+        _subsequentAmount = bound(
+            _subsequentAmount,
+            1e9,
+            maxFuzzAmount - _initialAmount
+        );
         setFees(0, 0); // set fees to 0 to make life easy
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        mintAndDepositIntoStrategy(strategy, user, _initialAmount);
 
         // default check
         uint256 strategyTotalAssetsBefore = strategy.estimatedTotalAssets();
-        assertEq(strategyTotalAssetsBefore, _amount, "!eta");
+        assertEq(strategyTotalAssetsBefore, _initialAmount, "!eta");
 
         Helpers.logStrategyInfo(strategy);
 
@@ -247,20 +259,23 @@ contract OperationTest is Setup {
         vm.prank(keeper);
         strategy.tend();
 
+        strategyTotalAssetsBefore = strategy.estimatedTotalAssets();
+
         Helpers.logStrategyInfo(strategy);
 
         // do an another deposit when position is open, since the "priceIndex" is "0"
         uint256 balanceBefore = asset.balanceOf(user);
-        deal(address(asset), user, balanceBefore + _amount);
-
-        vm.prank(user);
-        asset.approve(address(strategy), _amount);
+        deal(address(asset), user, balanceBefore + _subsequentAmount);
 
         vm.startPrank(user);
-        // function will revert with the following.
-        //vm.expectRevert(bytes4(keccak256("BucketPriceOutOfBounds()")));
-        strategy.deposit(_amount, user);
+        asset.approve(address(strategy), _subsequentAmount);
+        strategy.deposit(_subsequentAmount, user);
         vm.stopPrank();
+        assertEq(
+            strategy.estimatedTotalAssets(),
+            strategyTotalAssetsBefore + _subsequentAmount,
+            "!eta"
+        );
     }
 
     function test_ltvChanges(uint64 _startingLtv, uint64 _endingLtv) public {

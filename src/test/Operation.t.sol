@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract OperationTest is Setup {
     using Helpers for IStrategyInterface;
 
-    uint256 public constant REPORTING_PERIOD = 60 days;
+    uint256 public constant REPORTING_PERIOD = 120 days;
 
     function setUp() public virtual override {
         super.setUp();
@@ -50,7 +50,7 @@ contract OperationTest is Setup {
         skip(1 days);
 
         Helpers.logStrategyInfo(strategy);
-        
+
         // allow loss
         vm.prank(management);
         strategy.setDoHealthCheck(false);
@@ -230,6 +230,39 @@ contract OperationTest is Setup {
         }
     }
 
+    function test_depositWhenPositionIsOpen(uint256 _amount) public {
+        _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
+        setFees(0, 0); // set fees to 0 to make life easy
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        // default check
+        uint256 strategyTotalAssetsBefore = strategy.estimatedTotalAssets();
+        assertEq(strategyTotalAssetsBefore, _amount, "!eta");
+
+        Helpers.logStrategyInfo(strategy);
+
+        // put funds into position
+        vm.prank(keeper);
+        strategy.tend();
+
+        Helpers.logStrategyInfo(strategy);
+
+        // do an another deposit when position is open, since the "priceIndex" is "0"
+        uint256 balanceBefore = asset.balanceOf(user);
+        deal(address(asset), user, balanceBefore + _amount);
+
+        vm.prank(user);
+        asset.approve(address(strategy), _amount);
+
+        vm.startPrank(user);
+        // function will revert with the following.
+        //vm.expectRevert(bytes4(keccak256("BucketPriceOutOfBounds()")));
+        strategy.deposit(_amount, user);
+        vm.stopPrank();
+    }
+
     function test_ltvChanges(uint64 _startingLtv, uint64 _endingLtv) public {
         _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
         _endingLtv = uint64(bound(_endingLtv, 0.4e18, 0.85e18)); // max ltv 85%
@@ -275,7 +308,7 @@ contract OperationTest is Setup {
 
     function test_ltvToZero(uint64 _startingLtv) public {
         _startingLtv = uint64(bound(_startingLtv, 0.4e18, 0.85e18)); // max ltv 85%
-        uint64 _endingLtv = 0; 
+        uint64 _endingLtv = 0;
 
         vm.assume(
             Helpers.abs(int64(strategy.ltvs().targetLTV) - int64(_endingLtv)) >
@@ -314,11 +347,14 @@ contract OperationTest is Setup {
         strategy.tend();
         Helpers.logStrategyInfo(strategy);
         checkLTV(false);
-        assertEq(strategy.totalIdle(), strategy.estimatedTotalAssetsNoSlippage());
- 
+        assertEq(
+            strategy.totalIdle(),
+            strategy.estimatedTotalAssetsNoSlippage()
+        );
+
         // allow loss
         vm.prank(management);
-        strategy.setDoHealthCheck(false);   
+        strategy.setDoHealthCheck(false);
         vm.prank(keeper);
         strategy.report();
         assertEq(strategy.totalIdle(), strategy.totalAssets());

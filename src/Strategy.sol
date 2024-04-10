@@ -259,7 +259,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             return;
         }
 
-        _depositAndDraw(0, _amount, 0, false); // deposit as collateral
+        _depositAndDraw(0, _amount, ONE_WAD, false); // deposit as collateral
     }
 
     /**

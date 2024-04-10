@@ -997,17 +997,13 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _thresholdPrice
         )
     {
-        //return
-        //    POOL_INFO_UTILS.borrowerInfo(
-        //        address(ajnaPool),
-        //        address(summerfiAccount)
-        //    );
+        IERC20Pool _ajnaPool = ajnaPool;
 
         // TODO: copied from BUSL, am i going to open source jail?
-        (uint256 inflator, uint256 lastInflatorUpdate) = ajnaPool
+        (uint256 inflator, uint256 lastInflatorUpdate) = _ajnaPool
             .inflatorInfo();
 
-        (uint256 interestRate, ) = ajnaPool.interestRateInfo();
+        (uint256 interestRate, ) = _ajnaPool.interestRateInfo();
 
         uint256 pendingInflator = PoolCommons.pendingInflator(
             inflator,
@@ -1017,7 +1013,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
 
         uint256 t0Debt;
         uint256 npTpRatio;
-        (t0Debt, _collateral, npTpRatio) = ajnaPool.borrowerInfo(
+        (t0Debt, _collateral, npTpRatio) = _ajnaPool.borrowerInfo(
             address(summerfiAccount)
         );
 
@@ -1044,14 +1040,15 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @return _amount   The total quote token amount available to borrow or to be removed from pool, in `WAD` units.
      */
     function _availableWethBorrow() internal view returns (uint256 _amount) {
-        //return POOL_INFO_UTILS.availableQuoteTokenAmount(address(ajnaPool));
+        IERC20Pool _ajnaPool = ajnaPool;
+
         // TODO: copied from BUSL, am i going to open source jail?
-        (uint256 bondEscrowed, uint256 unclaimedReserve, , , ) = ajnaPool
+        (uint256 bondEscrowed, uint256 unclaimedReserve, , , ) = _ajnaPool
             .reservesInfo();
         uint256 escrowedAmounts = bondEscrowed + unclaimedReserve;
 
-        uint256 poolBalance = ERC20(WETH).balanceOf(address(ajnaPool)) *
-            ajnaPool.quoteTokenScale();
+        uint256 poolBalance = ERC20(WETH).balanceOf(address(_ajnaPool)) *
+            _ajnaPool.quoteTokenScale();
 
         if (poolBalance > escrowedAmounts)
             _amount = poolBalance - escrowedAmounts;

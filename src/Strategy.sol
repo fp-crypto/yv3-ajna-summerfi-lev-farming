@@ -1199,7 +1199,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         (uint256 _poolDebt, , , ) = _ajnaPool.debtInfo();
         (, , uint256 _noOfLoans) = _ajnaPool.loansInfo();
 
-        if (_noOfLoans != 0) {
+        if (_noOfLoans >= 10) {
             // minimum debt is 10% of the average loan size
             _minDebtAmount = (_poolDebt / _noOfLoans) / 10;
         }

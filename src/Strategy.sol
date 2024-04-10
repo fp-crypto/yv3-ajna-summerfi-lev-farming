@@ -429,7 +429,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         // Tend if ltv is lower than target range
         if (
             _currentLtv != 0 &&
-            _currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold && 
+            _currentLtv <= _ltvs.targetLTV - _ltvs.minAdjustThreshold &&
             _availableWethBorrow() > DUST_THRESHOLD
         ) {
             return true;
@@ -754,10 +754,6 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _ltvs.targetLTV,
                 _assetPerWeth
             );
-
-            if (_targetBorrow < _minLoanSize()) {
-                _targetBorrow = 0;
-            }
         } else {
             _assetToFree = _supply;
         }
@@ -772,6 +768,11 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint256 _repaymentAmount;
         unchecked {
             _repaymentAmount = _debt - _targetBorrow;
+        }
+
+        if (_targetBorrow < _minLoanSize(-int256(_repaymentAmount))) {
+            _targetBorrow = 0;
+            _repaymentAmount = _debt;
         }
 
         bool _closePosition = _repaymentAmount == _debt &&
@@ -1195,13 +1196,23 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     }
 
     function _minLoanSize() internal view returns (uint256 _minDebtAmount) {
+        _minLoanSize(0);
+    }
+
+    function _minLoanSize(int256 _debtDelta)
+        internal
+        view
+        returns (uint256 _minDebtAmount)
+    {
         IERC20Pool _ajnaPool = ajnaPool;
         (uint256 _poolDebt, , , ) = _ajnaPool.debtInfo();
         (, , uint256 _noOfLoans) = _ajnaPool.loansInfo();
 
         if (_noOfLoans >= 10) {
             // minimum debt is 10% of the average loan size
-            _minDebtAmount = (_poolDebt / _noOfLoans) / 10;
+            _minDebtAmount =
+                (uint256(int256(_poolDebt) + _debtDelta) / _noOfLoans) /
+                10;
         }
     }
 

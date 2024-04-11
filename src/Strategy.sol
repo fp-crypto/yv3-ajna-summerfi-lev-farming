@@ -1190,8 +1190,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         return abi.decode(data, (uint256));
     }
 
-    function _minLoanSize() internal view returns (uint256 _minDebtAmount) {
-        _minLoanSize(0);
+    function _minLoanSize() internal view returns (uint256) {
+        return _minLoanSize(0);
     }
 
     function _minLoanSize(int256 _debtDelta)

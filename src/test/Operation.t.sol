@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract OperationTest is Setup {
     using Helpers for IStrategyInterface;
 
-    uint256 public constant REPORTING_PERIOD = 120 days;
+    uint256 public constant REPORTING_PERIOD = 75 days;
 
     function setUp() public virtual override {
         super.setUp();
@@ -157,9 +157,6 @@ contract OperationTest is Setup {
             _depositAmount > _withdrawAmount && _withdrawAmount >= 0.025e18
         );
 
-        vm.prank(management);
-        strategy.setSlippageAllowedBps(100);
-
         // Deposit into strategy
         mintAndDepositIntoStrategy(strategy, user, _depositAmount);
 
@@ -172,12 +169,15 @@ contract OperationTest is Setup {
 
         if (profit) {
             // Make money
-            uint256 _lstPrice = Helpers.generatePaperProfit(
+            uint256 _lstPrice = Helpers.generatePaperProfitOrLoss(
                 vm,
                 strategy,
-                REPORTING_PERIOD
+                115
             );
             Helpers.setUniswapPoolPrice(vm, strategy, _lstPrice);
+            // set slippage higher to prevent too much pain
+            vm.prank(management);
+            strategy.setSlippageAllowedBps(125);
             skip(REPORTING_PERIOD);
         }
 

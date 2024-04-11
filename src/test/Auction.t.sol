@@ -16,15 +16,18 @@ contract AuctionTest is Setup {
     function setUp() public virtual override {
         super.setUp();
 
+        vm.startPrank(management);
         AuctionFactory auctionFactory = AuctionFactory(
             strategy.auctionFactory()
         );
         auction = Auction(
             auctionFactory.createNewAuction(strategy.asset(), address(strategy))
         );
-        vm.prank(auction.governance());
         auctionId = auction.enable(address(ajnaToken), address(strategy));
         auction.setHookFlags(true, true, false, false);
+
+        strategy.setAuction(address(auction));
+        vm.stopPrank();
 
         setFees(0, 0); // set fees to 0 to make life easy
     }
@@ -74,7 +77,6 @@ contract AuctionTest is Setup {
         (uint256 profit, uint256 loss) = strategy.report();
         checkLTV(false);
 
-        // Expect a loss
         assertGt(profit, 0, "!profit");
         assertEq(loss, 0, "!loss");
 

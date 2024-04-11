@@ -108,7 +108,6 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ltvs = _ltvs;
 
         _setUniswapFee(_uniswapFee);
-        _enableAuction(AJNA_TOKEN, address(asset));
     }
 
     /*******************************************

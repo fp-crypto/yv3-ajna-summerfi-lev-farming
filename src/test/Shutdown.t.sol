@@ -8,7 +8,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract ShutdownTest is Setup {
     using Helpers for IStrategyInterface;
 
-    uint256 public constant REPORTING_PERIOD = 60 days;
+    uint256 public constant REPORTING_PERIOD = 120 days;
 
     function setUp() public virtual override {
         super.setUp();
@@ -55,7 +55,7 @@ contract ShutdownTest is Setup {
         if (profit) {
             assertGe(
                 asset.balanceOf(user),
-                balanceBefore + _amount,
+                (balanceBefore + _amount),
                 "!final balance"
             );
         } else {

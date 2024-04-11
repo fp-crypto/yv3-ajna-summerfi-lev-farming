@@ -336,8 +336,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         override
         returns (uint256 _totalAssets)
     {
-        uint256 _idle = _looseAssets();
-        _adjustPosition(_idle);
+        _adjustPosition(_looseAssets());
         (uint256 _debt, uint256 _collateral, , ) = _positionInfo();
         _totalAssets =
             _calculateNetPositionWithMaxSlippage(
@@ -345,7 +344,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 _collateral,
                 _getAssetPerWeth()
             ) +
-            _idle;
+            _looseAssets();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -719,7 +718,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _toBorrow = _availableBorrow;
         }
 
-        if (_toBorrow < DUST_THRESHOLD || _debt + _toBorrow < _minLoanSize() ) {
+        if (_toBorrow < DUST_THRESHOLD || _debt + _toBorrow < _minLoanSize()) {
             return;
         }
 

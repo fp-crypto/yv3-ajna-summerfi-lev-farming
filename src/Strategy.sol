@@ -289,7 +289,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             _debt,
             _collateral,
             _price
-        );
+        ) + _looseAssets();
         uint256 _totalAssets = TokenizedStrategy.totalAssets();
         uint256 _deployed = _deployedAssets(_totalAssets);
         if (_amount != _deployed && _positionValue < _totalAssets) {

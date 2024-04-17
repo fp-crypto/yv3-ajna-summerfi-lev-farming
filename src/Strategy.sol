@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.18;
 
-import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
-
+import {ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {BaseHealthCheck} from "@periphery/Bases/HealthCheck/BaseHealthCheck.sol";
 import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
 
@@ -13,7 +12,6 @@ import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
 import {Maths} from "@ajna-core/libraries/internal/Maths.sol";
 import {PoolCommons} from "@ajna-core/libraries/external/PoolCommons.sol";
-//import {PoolInfoUtils} from "@ajna-core/PoolInfoUtils.sol";
 
 import {IUniswapV3Pool} from "@uniswap-v3-core/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap-v3-core/interfaces/callback/IUniswapV3SwapCallback.sol";
@@ -890,7 +888,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _collateralToAdd = _looseAssets();
             if (!positionOpen) {
                 positionOpen = true;
-                _openPosition(_amountToPay, _collateralToAdd, ONE_WAD); // TODO: set real price
+                _openPosition(_amountToPay, _collateralToAdd, ONE_WAD);
             } else {
                 _depositAndDraw(_amountToPay, _collateralToAdd, ONE_WAD, false);
             }
@@ -999,7 +997,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     {
         IERC20Pool _ajnaPool = ajnaPool;
 
-        // TODO: copied from BUSL, am i going to open source jail?
+        // copied from BUSL, am i going to open source jail?
         (uint256 inflator, uint256 lastInflatorUpdate) = _ajnaPool
             .inflatorInfo();
 
@@ -1042,7 +1040,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     function _availableWethBorrow() internal view returns (uint256 _amount) {
         IERC20Pool _ajnaPool = ajnaPool;
 
-        // TODO: copied from BUSL, am i going to open source jail?
+        // copied from BUSL, am i going to open source jail?
         (uint256 bondEscrowed, uint256 unclaimedReserve, , , ) = _ajnaPool
             .reservesInfo();
         uint256 escrowedAmounts = bondEscrowed + unclaimedReserve;

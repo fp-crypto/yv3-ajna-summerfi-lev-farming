@@ -374,4 +374,31 @@ contract OperationTest is Setup {
         strategy.report();
         assertEq(strategy.totalIdle(), strategy.totalAssets());
     }
+
+    function test_unnecessaryLosses() public {
+        // 10 wsteth
+        uint256 _amount = 10e18;
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        Helpers.logStrategyInfo(strategy);
+
+        // put funds into position, expecting a LTV that is lesser than targetLTV
+        // because there are not enough WETH availabe in AJNA
+        vm.prank(keeper);
+        strategy.tend();
+
+        Helpers.logStrategyInfo(strategy);
+
+        vm.prank(management);
+        strategy.manualLeverDown(2e18, 0.85e18, true);
+
+        Helpers.logStrategyInfo(strategy);
+
+        vm.prank(user);
+        uint256 w = strategy.redeem(9e18, user, user);
+        console.log("w", w);
+        Helpers.logStrategyInfo(strategy);
+    }
 }

@@ -7,6 +7,7 @@ import {Auction, AuctionSwapper} from "@periphery/swappers/AuctionSwapper.sol";
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {IERC20Pool} from "@ajna-core/interfaces/pool/erc20/IERC20Pool.sol";
 import {COLLATERALIZATION_FACTOR} from "@ajna-core/libraries/helpers/PoolHelper.sol";
@@ -23,6 +24,8 @@ import {IAccountFactory} from "./interfaces/summerfi/IAccountFactory.sol";
 import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
+
+import "forge-std/console.sol"; // TODO: delete
 
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
@@ -46,6 +49,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     IERC20Pool public immutable ajnaPool;
     IChainlinkAggregator public immutable chainlinkOracle;
     bool public immutable oracleWrapped;
+    bool public immutable assetIs4626;
+    address public immutable assetUnderlying;
     bytes4 public immutable unwrappedToWrappedSelector;
     bool private immutable uniswapAsset0Weth1;
 
@@ -83,7 +88,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         uint24 _uniswapFee,
         bytes4 _unwrappedToWrappedSelector,
         address _chainlinkOracle,
-        bool _oracleWrapped
+        bool _oracleWrapped,
+        bool _assetIs4626
     ) BaseHealthCheck(_asset, _name) {
         require(_asset == IERC20Pool(_ajnaPool).collateralAddress(), "!collat"); // dev: asset must be collateral
         require(WETH == IERC20Pool(_ajnaPool).quoteTokenAddress(), "!weth"); // dev: quoteToken must be WETH
@@ -95,7 +101,15 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         unwrappedToWrappedSelector = _unwrappedToWrappedSelector;
         chainlinkOracle = IChainlinkAggregator(_chainlinkOracle);
         oracleWrapped = _oracleWrapped;
-        uniswapAsset0Weth1 = address(asset) < WETH;
+
+        address _assetUnderlying;
+        if (_assetIs4626) {
+            _assetUnderlying = IERC4626(_asset).asset();
+            ERC20(_assetUnderlying).safeApprove(_asset, type(uint256).max);
+        }
+        uniswapAsset0Weth1 = (_assetIs4626 ? _assetUnderlying : _asset) < WETH;
+        assetIs4626 = _assetIs4626;
+        assetUnderlying = _assetUnderlying;
 
         ERC20(_asset).safeApprove(_summerfiAccount, type(uint256).max);
 
@@ -206,10 +220,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      * @notice Sets the slippage allowed on swaps. Can only be called by management
      * @param _slippageAllowedBps The slippage allowed in basis points
      */
-    function setSlippageAllowedBps(uint16 _slippageAllowedBps)
-        external
-        onlyManagement
-    {
+    function setSlippageAllowedBps(
+        uint16 _slippageAllowedBps
+    ) external onlyManagement {
         require(_slippageAllowedBps <= MAX_BPS); // dev: cannot be more than 100%
         slippageAllowedBps = _slippageAllowedBps;
     }
@@ -222,10 +235,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         maxTendBasefee = _maxTendBasefee;
     }
 
-    function setMinAjnaToAuction(uint96 _minAjnaToAuction)
-        external
-        onlyManagement
-    {
+    function setMinAjnaToAuction(
+        uint96 _minAjnaToAuction
+    ) external onlyManagement {
         minAjnaToAuction = _minAjnaToAuction;
     }
 
@@ -396,7 +408,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
         uint256 _assetPerWeth = _getAssetPerWeth();
-        uint256 _wethPerAsset = (ONE_WAD**2) / _assetPerWeth;
+        uint256 _wethPerAsset = (ONE_WAD ** 2) / _assetPerWeth;
         uint256 _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
 
         // We need to lever down if the LTV is past the emergencyThreshold
@@ -508,12 +520,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ); // dev: ltv in target
     }
 
-    function _auctionKicked(address _token)
-        internal
-        virtual
-        override
-        returns (uint256 _kicked)
-    {
+    function _auctionKicked(
+        address _token
+    ) internal virtual override returns (uint256 _kicked) {
         require(_token == AJNA_TOKEN); // dev: only sell ajna
         _kicked = super._auctionKicked(_token);
         require(_kicked >= minAjnaToAuction); // dev: too little
@@ -592,6 +601,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             LeverData(LeverAction.ManualSwap, 0, 0, 0)
         );
 
+        if (_assetForWeth && assetIs4626) {
+            _amountIn = IERC4626(address(asset)).convertToAssets(_amountIn);
+        }
+
         (int256 amount0, int256 amount1) = uniswapPool.swap(
             address(this),
             zeroForOne,
@@ -640,7 +653,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         ) = _positionInfo();
         LTVConfig memory _ltvs = ltvs;
         uint256 _assetPerWeth = _getAssetPerWeth();
-        uint256 _wethPerAsset = ONE_WAD**2 / _assetPerWeth;
+        uint256 _wethPerAsset = ONE_WAD ** 2 / _assetPerWeth;
         uint256 _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
 
         if (
@@ -665,6 +678,8 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         (_debt, _collateral, , _thresholdPrice) = _positionInfo();
 
         _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
+        console.log("_currentLtv: %e", _currentLtv);
+        console.log("_targetLTV: %e", _ltvs.targetLTV);
         require(
             _currentLtv < _ltvs.targetLTV + _ltvs.minAdjustThreshold,
             "!ltv"
@@ -785,9 +800,10 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *               UNISWAP FUNCTIONS                *
      **************************************************/
 
-    function _swapAndLeverUp(uint256 _borrowAmount, uint256 _assetPerWeth)
-        private
-    {
+    function _swapAndLeverUp(
+        uint256 _borrowAmount,
+        uint256 _assetPerWeth
+    ) private {
         bool zeroForOne = !uniswapAsset0Weth1;
 
         bytes memory _data = abi.encode(
@@ -880,9 +896,20 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         if (_leverData.action == LeverAction.LeverUp) {
             require(_isExactInput); // dev: WTF
 
+            console.log("_amountReceived: %d", _amountReceived);
+
+            if (assetIs4626) {
+                _amountReceived = IERC4626(address(asset)).deposit(
+                    _amountReceived,
+                    address(this)
+                );
+            }
+            console.log("_amountReceived: %d", _amountReceived);
+
             uint256 _leastAssetReceived = (((_amountToPay *
                 (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
                 _leverData.assetPerWeth) / ONE_WAD;
+            console.log("_leastAssetReceived: %d", _leastAssetReceived);
             require(_amountReceived >= _leastAssetReceived, "!slippage"); // dev: too much slippage
 
             uint256 _collateralToAdd = _looseAssets();
@@ -904,7 +931,14 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _mostAssetToPay = (_expectedAssetToPay *
                 (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
 
-            require(_amountToPay <= _mostAssetToPay, "!slippage"); // dev: too much slippage
+            require(
+                (
+                    assetIs4626
+                        ? IERC4626(address(asset)).convertToShares(_amountToPay)
+                        : _amountToPay
+                ) <= _mostAssetToPay,
+                "!slippage"
+            ); // dev: too much slippage
 
             if (_amountToPay > _expectedAssetToPay) {
                 // pass slippage onto the asset to free amount
@@ -929,7 +963,15 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 positionOpen = false;
                 _repayAndClose(_amountReceived);
             }
-            asset.transfer(msg.sender, _amountToPay);
+            if (assetIs4626) {
+                IERC4626(address(asset)).withdraw(
+                    _amountToPay,
+                    msg.sender,
+                    address(this)
+                );
+            } else {
+                asset.transfer(msg.sender, _amountToPay);
+            }
         } else if (_leverData.action == LeverAction.ManualSwap) {
             //require(_isExactInput, "!wtf"); // dev: WTF
 
@@ -937,8 +979,23 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 (_amount0Delta > 0 && uniswapAsset0Weth1) ||
                 (_amount1Delta > 0 && !uniswapAsset0Weth1)
             ) {
-                asset.transfer(msg.sender, _amountToPay);
+                if (assetIs4626) {
+                    IERC4626(address(asset)).withdraw(
+                        _amountToPay,
+                        address(this),
+                        address(this)
+                    );
+                    ERC20(assetUnderlying).transfer(msg.sender, _amountToPay);
+                } else {
+                    asset.transfer(msg.sender, _amountToPay);
+                }
             } else {
+                if (assetIs4626) {
+                    IERC4626(address(asset)).deposit(
+                        _amountReceived,
+                        address(this)
+                    );
+                }
                 ERC20(WETH).transfer(msg.sender, _amountToPay);
             }
         }
@@ -968,11 +1025,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @notice Returns the strategy assets which are not idle
      *  @return . The strategy's total debt
      */
-    function _deployedAssets(uint256 _totalAssets)
-        internal
-        view
-        returns (uint256)
-    {
+    function _deployedAssets(
+        uint256 _totalAssets
+    ) internal view returns (uint256) {
         uint256 _idle = _looseAssets();
         if (_idle >= _totalAssets) return 0;
         return _totalAssets - _idle;
@@ -1057,7 +1112,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      *  @return Conversion rate
      */
     function _getAssetPerWeth() internal view returns (uint256) {
-        uint256 _answer = (ONE_WAD**2) /
+        uint256 _answer = (ONE_WAD * (10 ** chainlinkOracle.decimals())) /
             uint256(chainlinkOracle.latestAnswer());
         if (oracleWrapped) {
             return _answer;
@@ -1070,13 +1125,15 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      **************************************************/
 
     function _setUniswapFee(uint24 _fee) internal {
+        address _poolToken = assetIs4626 ? assetUnderlying : address(asset);
+
         IUniswapV3Pool _uniswapPool = IUniswapV3Pool(
-            UNISWAP_FACTORY.getPool(address(asset), WETH, _fee)
+            UNISWAP_FACTORY.getPool(_poolToken, WETH, _fee)
         );
         require(
-            _uniswapPool.token0() == address(asset) ||
-                _uniswapPool.token1() == address(asset)
-        ); // dev: pool must contain asset
+            _uniswapPool.token0() == _poolToken ||
+                _uniswapPool.token1() == _poolToken
+        ); // dev: pool must contain pool token
         require(
             _uniswapPool.token0() == address(WETH) ||
                 _uniswapPool.token1() == address(WETH)
@@ -1175,11 +1232,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         }
     }
 
-    function _unwrappedToWrappedAsset(uint256 _amount)
-        internal
-        view
-        returns (uint256)
-    {
+    function _unwrappedToWrappedAsset(
+        uint256 _amount
+    ) internal view returns (uint256) {
         (bool success, bytes memory data) = address(asset).staticcall(
             abi.encodeWithSelector(unwrappedToWrappedSelector, _amount)
         );
@@ -1191,11 +1246,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         return _minLoanSize(0);
     }
 
-    function _minLoanSize(int256 _debtDelta)
-        internal
-        view
-        returns (uint256 _minDebtAmount)
-    {
+    function _minLoanSize(
+        int256 _debtDelta
+    ) internal view returns (uint256 _minDebtAmount) {
         IERC20Pool _ajnaPool = ajnaPool;
         (uint256 _poolDebt, , , ) = _ajnaPool.debtInfo();
         (, , uint256 _noOfLoans) = _ajnaPool.loansInfo();

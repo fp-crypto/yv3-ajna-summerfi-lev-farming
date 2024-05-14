@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract OperationTest is Setup {
     using Helpers for IStrategyInterface;
 
-    uint256 public constant REPORTING_PERIOD = 75 days;
+    uint256 public constant REPORTING_PERIOD = 90 days;
 
     function setUp() public virtual override {
         super.setUp();

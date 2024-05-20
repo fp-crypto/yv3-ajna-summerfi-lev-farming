@@ -11,16 +11,17 @@ import {IWETH} from "../IWETH.sol";
 interface IAjnaPoolUtilsInfo {
     function priceToIndex(uint256 price_) external pure returns (uint256);
 
-    function borrowerInfo(address pool_, address borrower_)
+    function borrowerInfo(
+        address pool_,
+        address borrower_
+    )
         external
         view
-        returns (
-            uint256 debt_,
-            uint256 collateral_,
-            uint256 index_
-        );
+        returns (uint256 debt_, uint256 collateral_, uint256 index_);
 
-    function poolPricesInfo(address ajnaPool_)
+    function poolPricesInfo(
+        address ajnaPool_
+    )
         external
         view
         returns (
@@ -38,7 +39,10 @@ interface IAjnaPoolUtilsInfo {
         uint256 index_
     ) external view returns (uint256 quoteAmount_);
 
-    function bucketInfo(address ajnaPool_, uint256 index_)
+    function bucketInfo(
+        address ajnaPool_,
+        uint256 index_
+    )
         external
         view
         returns (
@@ -58,16 +62,12 @@ interface IAccountGuard {
 
     function setWhitelist(address target, bool status) external;
 
-    function canCall(address proxy, address operator)
-        external
-        view
-        returns (bool);
+    function canCall(
+        address proxy,
+        address operator
+    ) external view returns (bool);
 
-    function permit(
-        address caller,
-        address target,
-        bool allowance
-    ) external;
+    function permit(address caller, address target, bool allowance) external;
 
     function isWhitelisted(address target) external view returns (bool);
 
@@ -240,10 +240,10 @@ contract AjnaProxyActions {
      * @param  pool         Address of the Ajna Pool.
      * @param  price        Price of the bucket to redeem.
      */
-    function _removeCollateral(IERC20Pool pool, uint256 price)
-        internal
-        returns (uint256 withdrawnBalance)
-    {
+    function _removeCollateral(
+        IERC20Pool pool,
+        uint256 price
+    ) internal returns (uint256 withdrawnBalance) {
         address collateralToken = pool.collateralAddress();
         uint256 index = convertPriceToIndex(price);
         (uint256 withdrawnBalanceWAD, ) = pool.removeCollateral(
@@ -708,11 +708,10 @@ contract AjnaProxyActions {
      *  @dev price of uint (10**decimals) collateral token in debt token (10**decimals) with 18 decimal points for instance
      *  @dev     1WBTC = 16,990.23 USDC   translates to: 16990230000000000000000
      */
-    function getQuoteAmount(IERC20Pool pool, uint256 price)
-        public
-        view
-        returns (uint256 quoteAmount)
-    {
+    function getQuoteAmount(
+        IERC20Pool pool,
+        uint256 price
+    ) public view returns (uint256 quoteAmount) {
         uint256 index = convertPriceToIndex(price);
 
         (uint256 lpCount, ) = pool.lenderInfo(index, address(this));
@@ -729,11 +728,10 @@ contract AjnaProxyActions {
      *  @param  tokenScale_   Scale of the token, presented as a power of `10`.
      *  @return scaledAmount_ Rounded value.
      */
-    function _roundToScale(uint256 amount_, uint256 tokenScale_)
-        internal
-        pure
-        returns (uint256 scaledAmount_)
-    {
+    function _roundToScale(
+        uint256 amount_,
+        uint256 tokenScale_
+    ) internal pure returns (uint256 scaledAmount_) {
         scaledAmount_ = (amount_ / tokenScale_) * tokenScale_;
     }
 
@@ -743,11 +741,10 @@ contract AjnaProxyActions {
      *  @param  tokenScale_   Scale of the token, presented as a power of `10`.
      *  @return scaledAmount_ Rounded value.
      */
-    function _roundUpToScale(uint256 amount_, uint256 tokenScale_)
-        internal
-        pure
-        returns (uint256 scaledAmount_)
-    {
+    function _roundUpToScale(
+        uint256 amount_,
+        uint256 tokenScale_
+    ) internal pure returns (uint256 scaledAmount_) {
         if (amount_ % tokenScale_ == 0) scaledAmount_ = amount_;
         else scaledAmount_ = _roundToScale(amount_, tokenScale_) + tokenScale_;
     }

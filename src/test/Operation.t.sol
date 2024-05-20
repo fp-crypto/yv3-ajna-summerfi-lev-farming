@@ -9,7 +9,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract OperationTest is Setup {
     using Helpers for IStrategyInterface;
 
-    uint256 public constant REPORTING_PERIOD = 75 days;
+    uint256 public constant REPORTING_PERIOD = 90 days;
 
     function setUp() public virtual override {
         super.setUp();
@@ -135,12 +135,13 @@ contract OperationTest is Setup {
         vm.prank(user);
         strategy.redeem(_amount, user, user);
 
+        Helpers.logStrategyInfo(strategy);
         assertGe(
             asset.balanceOf(user),
             balanceBefore + _amount,
             "!final balance"
         );
-        assertFalse(strategy.positionOpen());
+        assertFalse(strategy.positionOpen(), "!position closed");
 
         Helpers.logStrategyInfo(strategy);
     }

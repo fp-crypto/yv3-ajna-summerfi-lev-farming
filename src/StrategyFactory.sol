@@ -32,7 +32,8 @@ contract StrategyFactory {
         uint24 _uniswapFee,
         bytes4 _unwrappedToWrappedSelector,
         address _chainlinkOracle,
-        bool _oracleWrapped
+        bool _oracleWrapped,
+        bool _assetIs4626
     ) external returns (address) {
         if (deployments[_asset] != address(0))
             revert AlreadyDeployed(deployments[_asset]);
@@ -48,7 +49,8 @@ contract StrategyFactory {
                     _uniswapFee,
                     _unwrappedToWrappedSelector,
                     _chainlinkOracle,
-                    _oracleWrapped
+                    _oracleWrapped,
+                    _assetIs4626
                 )
             )
         );

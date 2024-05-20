@@ -59,7 +59,7 @@ contract LiquidationTest is Setup {
 
         auctionStatus(address(ajnaPool), borrower);
 
-        ajnaPool.take(borrower, 2**256 - 1, liquidator, "");
+        ajnaPool.take(borrower, 2 ** 256 - 1, liquidator, "");
         vm.stopPrank();
 
         Helpers.logStrategyInfo(strategy);
@@ -114,7 +114,7 @@ contract LiquidationTest is Setup {
 
         auctionStatus(address(ajnaPool), borrower);
 
-        ajnaPool.take(borrower, 2**256 - 1, liquidator, "");
+        ajnaPool.take(borrower, 2 ** 256 - 1, liquidator, "");
         vm.stopPrank();
 
         Helpers.logStrategyInfo(strategy);

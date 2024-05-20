@@ -25,8 +25,6 @@ import {AjnaProxyActions} from "./interfaces/summerfi/AjnaProxyActions.sol";
 import {IAjnaRedeemer} from "./interfaces/summerfi/IAjnaRedeemer.sol";
 import {IChainlinkAggregator} from "./interfaces/chainlink/IChainlinkAggregator.sol";
 
-import "forge-std/console.sol"; // TODO: delete
-
 contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
     using SafeERC20 for ERC20;
 
@@ -678,8 +676,6 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         (_debt, _collateral, , _thresholdPrice) = _positionInfo();
 
         _currentLtv = _calculateLTV(_debt, _collateral, _assetPerWeth);
-        console.log("_currentLtv: %e", _currentLtv);
-        console.log("_targetLTV: %e", _ltvs.targetLTV);
         require(
             _currentLtv < _ltvs.targetLTV + _ltvs.minAdjustThreshold,
             "!ltv"
@@ -755,7 +751,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         );
 
         uint256 _targetBorrow;
-        if (_supply > _assetToFree) {
+        if (_supply > _assetToFree && _assetToFree < _deployedAssets) {
             _targetBorrow = _getBorrowFromSupply(
                 _supply - _assetToFree,
                 _ltvs.targetLTV,
@@ -896,20 +892,16 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
         if (_leverData.action == LeverAction.LeverUp) {
             require(_isExactInput); // dev: WTF
 
-            console.log("_amountReceived: %d", _amountReceived);
-
             if (assetIs4626) {
                 _amountReceived = IERC4626(address(asset)).deposit(
                     _amountReceived,
                     address(this)
                 );
             }
-            console.log("_amountReceived: %d", _amountReceived);
 
             uint256 _leastAssetReceived = (((_amountToPay *
                 (MAX_BPS - slippageAllowedBps)) / MAX_BPS) *
                 _leverData.assetPerWeth) / ONE_WAD;
-            console.log("_leastAssetReceived: %d", _leastAssetReceived);
             require(_amountReceived >= _leastAssetReceived, "!slippage"); // dev: too much slippage
 
             uint256 _collateralToAdd = _looseAssets();
@@ -931,14 +923,13 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
             uint256 _mostAssetToPay = (_expectedAssetToPay *
                 (MAX_BPS + slippageAllowedBps)) / MAX_BPS;
 
-            require(
-                (
-                    assetIs4626
-                        ? IERC4626(address(asset)).convertToShares(_amountToPay)
-                        : _amountToPay
-                ) <= _mostAssetToPay,
-                "!slippage"
-            ); // dev: too much slippage
+            if (assetIs4626) {
+                _amountToPay =
+                    IERC4626(address(asset)).convertToShares(_amountToPay) +
+                    1; // add 1 because of rounding errors
+            }
+
+            require(_amountToPay <= _mostAssetToPay, "!slippage"); // dev: too much slippage
 
             if (_amountToPay > _expectedAssetToPay) {
                 // pass slippage onto the asset to free amount
@@ -963,8 +954,9 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
                 positionOpen = false;
                 _repayAndClose(_amountReceived);
             }
+
             if (assetIs4626) {
-                IERC4626(address(asset)).withdraw(
+                IERC4626(address(asset)).redeem( //withdraw(
                     _amountToPay,
                     msg.sender,
                     address(this)
@@ -1113,7 +1105,7 @@ contract Strategy is BaseHealthCheck, IUniswapV3SwapCallback, AuctionSwapper {
      */
     function _getAssetPerWeth() internal view returns (uint256) {
         uint256 _answer = (ONE_WAD * (10 ** chainlinkOracle.decimals())) /
-            uint256(chainlinkOracle.latestAnswer());
+            uint256(chainlinkOracle.latestRoundData().answer);
         if (oracleWrapped) {
             return _answer;
         }

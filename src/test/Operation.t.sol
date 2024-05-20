@@ -135,12 +135,13 @@ contract OperationTest is Setup {
         vm.prank(user);
         strategy.redeem(_amount, user, user);
 
+        Helpers.logStrategyInfo(strategy);
         assertGe(
             asset.balanceOf(user),
             balanceBefore + _amount,
             "!final balance"
         );
-        assertFalse(strategy.positionOpen());
+        assertFalse(strategy.positionOpen(), "!position closed");
 
         Helpers.logStrategyInfo(strategy);
     }

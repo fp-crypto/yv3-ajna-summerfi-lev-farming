@@ -8,7 +8,15 @@ interface IChainlinkAggregator {
 
     function latestRound() external view returns (uint256);
 
-    function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
+    struct RoundData {
+        uint80 roundId;
+        int256 answer;
+        uint256 startedAt;
+        uint256 updatedAt;
+        uint80 answeredInRound;
+    }
+
+    function latestRoundData() external view returns (RoundData memory);
 
     function getAnswer(uint256 roundId) external view returns (int256);
 

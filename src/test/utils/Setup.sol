@@ -118,7 +118,7 @@ contract Setup is ExtendedTest, IEvents {
         _strategy.setSlippageAllowedBps(50);
         vm.stopPrank();
 
-        supplyQuote(maxFuzzAmount * 20, getAjnaPoolForAsset(address(asset)));
+        supplyQuote(maxFuzzAmount * 100, getAjnaPoolForAsset(address(asset)));
 
         return address(_strategy);
     }

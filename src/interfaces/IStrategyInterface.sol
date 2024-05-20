@@ -8,6 +8,9 @@ interface IStrategyInterface is IBaseHealthCheck {
 
     function AJNA_TOKEN() external view returns (address);
 
+    function assetIs4626() external view returns (bool);
+    function assetUnderlying() external view returns (address);
+
     function summerfiAccount() external view returns (address);
 
     function ajnaPool() external view returns (address);

@@ -41,12 +41,10 @@ contract StrategyAprOracle is AprOracleBase {
      * @param  _delta    The difference in debt.
      * @return _apr      The expected apr for the strategy represented as 1e18.
      */
-    function aprAfterDebtChange(address _strategy, int256 _delta)
-        external
-        view
-        override
-        returns (uint256 _apr)
-    {
+    function aprAfterDebtChange(
+        address _strategy,
+        int256 _delta
+    ) external view override returns (uint256 _apr) {
         IStrategyInterface _iStrategy = IStrategyInterface(_strategy);
         address _asset = _iStrategy.asset();
 
@@ -68,7 +66,7 @@ contract StrategyAprOracle is AprOracleBase {
         (uint256 _ajnaBorrowApr, ) = _ajnaPool.interestRateInfo();
         uint256 _targetLTV = _iStrategy.ltvs().targetLTV;
         uint256 _assets = WAD; // 1e18 to make the math easy
-        uint256 _collateral = WAD**2 / (WAD - _targetLTV);
+        uint256 _collateral = WAD ** 2 / (WAD - _targetLTV);
         uint256 _debt = (_collateral * _targetLTV) / WAD;
 
         uint256 _debtCost = (_debt * _ajnaBorrowApr) / WAD;
@@ -82,11 +80,9 @@ contract StrategyAprOracle is AprOracleBase {
         }
     }
 
-    function getLstAprFromUniswapTWAP(address _strategy)
-        external
-        view
-        returns (int256)
-    {
+    function getLstAprFromUniswapTWAP(
+        address _strategy
+    ) external view returns (int256) {
         IStrategyInterface _iStrategy = IStrategyInterface(_strategy);
         return
             _getLstAprFromUniswapTWAP(
@@ -99,15 +95,17 @@ contract StrategyAprOracle is AprOracleBase {
         lstApr[_lst] = _lstApr;
     }
 
-    function setUseUniswapTwap(address _lst, bool _useUniswapTwap) external onlyGovernance {
+    function setUseUniswapTwap(
+        address _lst,
+        bool _useUniswapTwap
+    ) external onlyGovernance {
         useUniswapTwap[_lst] = _useUniswapTwap;
     }
 
-    function _getLstAprFromUniswapTWAP(address _uniswapPool, address _asset)
-        internal
-        view
-        returns (int256 _lstApr)
-    {
+    function _getLstAprFromUniswapTWAP(
+        address _uniswapPool,
+        address _asset
+    ) internal view returns (int256 _lstApr) {
         uint32 oldestObservation = OracleLibrary.getOldestObservationSecondsAgo(
             _uniswapPool
         );
@@ -123,9 +121,10 @@ contract StrategyAprOracle is AprOracleBase {
         uint160 pastSqrtX96 = TickMath.getSqrtRatioAtTick(pastMeanTick);
         uint160 currentSqrtX96 = TickMath.getSqrtRatioAtTick(currentMeanTick);
 
-        uint256 pastPrice = (((uint256(pastSqrtX96) * WAD) / 2**96)**2) / WAD;
-        uint256 currentPrice = (((uint256(currentSqrtX96) * WAD) / 2**96)**2) /
+        uint256 pastPrice = (((uint256(pastSqrtX96) * WAD) / 2 ** 96) ** 2) /
             WAD;
+        uint256 currentPrice = (((uint256(currentSqrtX96) * WAD) / 2 ** 96) **
+            2) / WAD;
 
         if (IUniswapV3Pool(_uniswapPool).token1() == _asset) {
             pastPrice = 1e36 / pastPrice;

@@ -31,9 +31,16 @@ interface IBalancer {
     ) external;
 }
 
-interface IBalancerPool{
+interface IBalancerPool {
     function getPoolId() external view returns (bytes32);
     function getPrice() external view returns (uint256);
     function getSwapFeePercentage() external view returns (uint256);
-    function getPausedState() external view returns (bool paused, uint256 pauseWindowEndTime, uint256 bufferPeriodEndTime);
+    function getPausedState()
+        external
+        view
+        returns (
+            bool paused,
+            uint256 pauseWindowEndTime,
+            uint256 bufferPeriodEndTime
+        );
 }

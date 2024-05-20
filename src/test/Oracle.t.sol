@@ -54,10 +54,7 @@ contract OracleTest is Setup {
         oracle.setLstApr(_asset, _newLstApr);
         assertEq(oracle.lstApr(_asset), _newLstApr);
 
-        uint256 higherLstApr = oracle.aprAfterDebtChange(
-            _strategy,
-            0
-        );
+        uint256 higherLstApr = oracle.aprAfterDebtChange(_strategy, 0);
 
         assertLt(currentApr, higherLstApr, "higher Apr");
 
@@ -66,10 +63,7 @@ contract OracleTest is Setup {
         oracle.setLstApr(_asset, _newLstApr);
         assertEq(oracle.lstApr(_asset), _newLstApr);
 
-        uint256 lowerLstApr = oracle.aprAfterDebtChange(
-            _strategy,
-            0
-        );
+        uint256 lowerLstApr = oracle.aprAfterDebtChange(_strategy, 0);
 
         assertGt(currentApr, lowerLstApr, "lower Apr");
 

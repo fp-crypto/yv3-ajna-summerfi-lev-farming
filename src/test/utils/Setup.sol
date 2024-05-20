@@ -36,7 +36,8 @@ contract Setup is ExtendedTest, IEvents {
     // Addresses for different roles we will use repeatedly.
     address public user = address(10);
     address public keeper = address(4);
-    address public management = address(0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7);
+    address public management =
+        address(0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7);
     address public performanceFeeRecipient = address(3);
     address public ajnaDepositor = address(42069);
 
@@ -109,7 +110,7 @@ contract Setup is ExtendedTest, IEvents {
         // set management of the strategy
         _strategy.setPendingManagement(management);
         // set deposit limit
-        _strategy.setDepositLimit(2**256 - 1);
+        _strategy.setDepositLimit(2 ** 256 - 1);
         IStrategyInterface.LTVConfig memory _ltvConfig = _strategy.ltvs();
         _ltvConfig.targetLTV = 0.85e18;
         // set target ltv
@@ -135,11 +136,9 @@ contract Setup is ExtendedTest, IEvents {
         _strategy.deposit(_amount, _user);
     }
 
-    function getAjnaPoolForAsset(address _asset)
-        public
-        view
-        returns (address _pool)
-    {
+    function getAjnaPoolForAsset(
+        address _asset
+    ) public view returns (address _pool) {
         ERC20PoolFactory ajnaFactory = ERC20PoolFactory(
             0x6146DD43C5622bB6D12A5240ab9CF4de14eDC625
         );
@@ -167,20 +166,32 @@ contract Setup is ExtendedTest, IEvents {
         supplyQuote(_amount, _ajnaPool, 4130);
     }
 
-    function supplyQuote(uint256 _amount, address _ajnaPool, uint256 _bucketIndex) public {
+    function supplyQuote(
+        uint256 _amount,
+        address _ajnaPool,
+        uint256 _bucketIndex
+    ) public {
         ERC20 WETH = ERC20(tokenAddrs["WETH"]);
         airdrop(WETH, ajnaDepositor, _amount);
         vm.prank(ajnaDepositor);
         WETH.approve(_ajnaPool, _amount);
         vm.prank(ajnaDepositor);
-        IERC20Pool(_ajnaPool).addQuoteToken(_amount, _bucketIndex, type(uint256).max);
+        IERC20Pool(_ajnaPool).addQuoteToken(
+            _amount,
+            _bucketIndex,
+            type(uint256).max
+        );
     }
 
-    function totalIdle(IStrategyInterface _strategy) public view returns (uint256) {
+    function totalIdle(
+        IStrategyInterface _strategy
+    ) public view returns (uint256) {
         return ERC20(_strategy.asset()).balanceOf(address(_strategy));
     }
 
-    function totalDebt(IStrategyInterface _strategy) public view returns (uint256) {
+    function totalDebt(
+        IStrategyInterface _strategy
+    ) public view returns (uint256) {
         uint256 _totalIdle = totalIdle(_strategy);
         uint256 _totalAssets = _strategy.totalAssets();
         if (_totalIdle >= _totalAssets) return 0;
@@ -200,11 +211,7 @@ contract Setup is ExtendedTest, IEvents {
         assertEq(_totalAssets, _totalDebt + _totalIdle, "!Added");
     }
 
-    function airdrop(
-        ERC20 _asset,
-        address _to,
-        uint256 _amount
-    ) public {
+    function airdrop(ERC20 _asset, address _to, uint256 _amount) public {
         uint256 balanceBefore = _asset.balanceOf(_to);
         deal(address(_asset), _to, balanceBefore + _amount);
     }
@@ -239,7 +246,11 @@ contract Setup is ExtendedTest, IEvents {
         checkLTV(canBeZero, onlyCheckTooHigh, strategy.ltvs().targetLTV);
     }
 
-    function checkLTV(bool canBeZero, bool onlyCheckTooHigh, uint64 targetLTV) public {
+    function checkLTV(
+        bool canBeZero,
+        bool onlyCheckTooHigh,
+        uint64 targetLTV
+    ) public {
         if (canBeZero && strategy.currentLTV() == 0) return;
         if (onlyCheckTooHigh) {
             assertLe(

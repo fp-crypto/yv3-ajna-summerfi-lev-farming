@@ -14,9 +14,10 @@ contract ManualDeleverageTest is Setup {
         super.setUp();
     }
 
-    function test_manualLeverDown_targetLTV(uint256 _amount, uint64 _targetLTV)
-        public
-    {
+    function test_manualLeverDown_targetLTV(
+        uint256 _amount,
+        uint64 _targetLTV
+    ) public {
         vm.prank(management);
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
         _targetLTV = uint64(bound(_amount, 0, 0.80e18));
@@ -63,9 +64,10 @@ contract ManualDeleverageTest is Setup {
         Helpers.logStrategyInfo(strategy);
     }
 
-    function test_manualLeverDown_toLoose(uint256 _amount, uint256 _toLoose)
-        public
-    {
+    function test_manualLeverDown_toLoose(
+        uint256 _amount,
+        uint256 _toLoose
+    ) public {
         vm.prank(management);
         _amount = bound(_amount, minFuzzAmount, maxFuzzAmount);
 
@@ -172,9 +174,10 @@ contract ManualDeleverageTest is Setup {
         Helpers.logStrategyInfo(strategy);
     }
 
-    function test_manualLeverDown_force(uint64 _targetLTV, uint256 _toLoose)
-        public
-    {
+    function test_manualLeverDown_force(
+        uint64 _targetLTV,
+        uint256 _toLoose
+    ) public {
         uint256 _amount = maxFuzzAmount;
         _targetLTV = uint64(bound(_amount, 0, 0.50e18));
 
@@ -278,9 +281,11 @@ contract ManualDeleverageTest is Setup {
                 weth.balanceOf(address(strategy)),
                 _debt
             );
-            if (_repayAmount != _debt && _debt - _repayAmount < _minLoanSize()) {
+            if (
+                _repayAmount != _debt && _debt - _repayAmount < _minLoanSize()
+            ) {
                 // we need a donation to exit via this path
-                console.log("donating weth, %s", _debt -  _repayAmount);
+                console.log("donating weth, %s", _debt - _repayAmount);
                 deal(address(weth), address(strategy), _debt);
                 _repayAmount = _debt;
             }
